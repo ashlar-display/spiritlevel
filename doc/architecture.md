@@ -45,7 +45,7 @@ whether the link is scrambled, and what (if anything) is written to the sink's
 |---------------------|--------------------------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------|
 | TMDS character rate | `u32`, kHz                                             | the negotiated configuration (pixel clock × deep-colour factor, halved for YCbCr 4:2:0) — the same unit the stack's negotiation layer uses          |
 | Sink facts          | `SinkTmdsFacts { scdc_present, lte_340mcsc_scramble }` | the sink's HDMI Forum capabilities (`From<&HdmiForumSinkCap>`; no HF-SCDB means neither); the caller may clear a fact for a sink known to misbehave |
-| Source fact         | `low_rate_scrambling: bool`                            | the PHY's capabilities (from 0.2 the `TmdsPhy` capabilities report; in 0.1 the caller states it)                                                    |
+| Source fact         | `SourceTmdsFacts { low_rate_scrambling }`              | the PHY's capabilities (from 0.2 the `TmdsPhy` capabilities report; in 0.1 the caller states it)                                                    |
 | Policy              | `TmdsPolicy { low_rate_scrambling, threshold }`        | the caller; defaults below                                                                                                                          |
 
 The rate is an input, not computed here: the character rate depends on the negotiated
@@ -77,14 +77,12 @@ colour format, depth and pixel repetition, which is negotiation's knowledge, not
 
 **Output**
 
-`TmdsLinkParams` (`#[non_exhaustive]`): the clock ratio (`ClockRatio::{Div10, Div40}`),
-whether the source scrambles, and `sink_config: Option<TmdsConfigValue>` — the two
-`TMDS_Config` fields, `None` for a sink without SCDC. The PHY takes the ratio and the
-scrambling flag (0.2, `TmdsPhy`); the SCDC trait takes `sink_config`. The core states
-*what* the register holds, not its bit layout: the encoding belongs to the SCDC
-implementation (culvert's `TmdsConfig` already has it).
-
-Errors (`#[non_exhaustive]`): `ScramblingRequiredWithoutScdc { rate_khz }` (rule 5).
+`TmdsLinkParams`: the clock ratio, whether the link is scrambled and why, and the
+`TMDS_Config` value for the sink (`None` for a sink without SCDC). The PHY takes the ratio
+and the scrambling flag (0.2, `TmdsPhy`); the SCDC trait takes the sink's value. The core
+states *what* the register holds, not its bit layout: the encoding belongs to the SCDC
+implementation (culvert's `TmdsConfig` already has it). Error: `ScramblingRequiredWithoutScdc`
+(rule 5). Types under "Key Types".
 
 **Open points for this step**
 
@@ -125,8 +123,93 @@ full bring-up is needed instead.
 
 ### Owned protocol types
 
-*To settle:* the I/O-free core's inputs and outputs (link parameters, the scrambling choice,
-the `TMDS_Config` contents, timing rules); `#[non_exhaustive]` where consumers see them.
+These are the I/O-free core's vocabulary: the inputs and output of "Choosing the link
+parameters" and the contents of `TMDS_Config`. They are the whole public API of 0.1. Types
+for the procedures' timing come with the procedure sections.
+
+```rust
+/// The TMDS bit clock ratio: the TMDS clock runs at the bit rate / 10 or / 40.
+/// Exhaustive: `TMDS_Bit_Clock_Ratio` is one bit.
+pub enum ClockRatio { Div10, Div40 }
+
+/// Which character rate first requires scrambling and 1/40 (rule 4).
+#[non_exhaustive]
+pub enum ScramblingThreshold {
+    Above340,       // default: > 340 000 kHz
+    AtOrAbove340,   // ≥ 340 000 kHz
+}
+
+/// What the sink declares (`new`; `NONE` for a sink without HDMI Forum capabilities,
+/// e.g. a DVI or HDMI 1.x sink). `From<&HdmiForumSinkCap>` and
+/// `From<Option<&HdmiForumSinkCap>>`. `lte_340mcsc_scramble` counts only with
+/// `scdc_present` (rule 5).
+#[non_exhaustive]
+pub struct SinkTmdsFacts { pub scdc_present: bool, pub lte_340mcsc_scramble: bool }
+
+/// What the source's PHY can do (`new`). From 0.2 built from the `TmdsPhy` capabilities.
+#[non_exhaustive]
+pub struct SourceTmdsFacts { pub low_rate_scrambling: bool }
+
+/// The caller's choices (rules 3 and 4). `Default`/`DEFAULT`: low-rate scrambling on,
+/// `Above340`; `with_low_rate_scrambling`, `with_threshold`.
+#[non_exhaustive]
+pub struct TmdsPolicy { pub low_rate_scrambling: bool, pub threshold: ScramblingThreshold }
+
+/// The two fields of `TMDS_Config` (0x20), what is written and what a read returns
+/// (`new`). Its bit layout belongs to the SCDC implementation.
+#[non_exhaustive]
+pub struct SinkTmdsConfig { pub scrambling_enable: bool, pub high_clock_ratio: bool }
+
+/// Why the link is or is not scrambled.
+#[non_exhaustive]
+pub enum ScramblingDecision {
+    Required,             // above the threshold (rule 1)
+    LowRate,              // at or below; source, sink and policy all allow it (rule 3)
+    Off(ScramblingOff),   // at or below, not scrambled
+}
+
+#[non_exhaustive]
+pub enum ScramblingOff { PolicyOff, SourceCannot, SinkDoesNotDeclare, NoScdc }
+
+/// The chosen link. Fields are private, so the sink's value always matches the link:
+/// `clock_ratio()`, `scrambling()` (true for `Required` and `LowRate`),
+/// `scrambling_decision()`, `sink_config() -> Option<SinkTmdsConfig>` (`None` without
+/// SCDC). Built only by `choose`.
+#[non_exhaustive]
+pub struct TmdsLinkParams { /* private */ }
+
+impl TmdsLinkParams {
+    pub const fn choose(
+        rate_khz: u32,
+        sink: SinkTmdsFacts,
+        source: SourceTmdsFacts,
+        policy: TmdsPolicy,
+    ) -> Result<Self, ParamsError>;
+}
+
+/// `Display` and `core::error::Error`.
+#[non_exhaustive]
+pub enum ParamsError {
+    ScramblingRequiredWithoutScdc { rate_khz: u32 },   // rule 5
+}
+```
+
+All are `Debug, Clone, Copy, PartialEq, Eq` (and `Hash` where it costs nothing); all
+constructors are `const fn`, so a firmware can fix its policy and facts at compile time.
+
+- **Why private fields on `TmdsLinkParams`:** the PHY and the sink must agree. With public
+  fields a caller could change the ratio and leave `sink_config` stale; with getters the
+  only way to a `TmdsLinkParams` is through the rules.
+- **Why `ScramblingDecision`:** an unscrambled low-rate link is not a failure, but the
+  stack's diagnostics say why a choice was made; a caller expecting scrambling sees which
+  of source, sink or policy declined it.
+- **Why the sink facts are a struct of their own,** not `HdmiForumSinkCap` directly: the
+  core needs two flags, a caller can override a misbehaving sink without editing parsed
+  EDID data, and 0.1 does not tie its API to display-types' struct beyond the `From`
+  impls.
+
+**Open point:** optional `serde` derives behind a feature, as display-types and
+concordance have, once `serde` without `std` is settled for the stack.
 
 ### The SCDC trait
 
