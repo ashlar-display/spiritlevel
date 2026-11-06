@@ -5,27 +5,82 @@
 
 ## Role
 
-*To settle:* what `spiritlevel` is (TMDS bring-up for an HDMI source: configure the sink
-over SCDC, start TMDS output, verify scrambling, tear down), how it relates to plumbob
-(TMDS beside FRL; plumbob scopes TMDS out), and that it is usable on its own (a driver or
-firmware can take it without the link orchestrator above it).
+`spiritlevel` brings up and tears down the TMDS link of an HDMI source. It decides the
+link's clock ratio and scrambling from the character rate, configures the sink over SCDC,
+starts TMDS output in the right order, and checks that the sink follows; it also checks,
+after a reconnect, whether the sink still holds that configuration.
+
+TMDS and FRL are separate link modes with separate procedures. FRL link training is
+plumbob's, and plumbob scopes TMDS out; `spiritlevel` is its counterpart for TMDS, beside it
+in the stack rather than on top of it. A link orchestrator chooses between them; neither
+knows of the other.
+
+Like plumbob, it defines the interfaces it needs instead of depending on particular
+implementations: a small SCDC trait of its own, and hdmi-hal's PHY, power, clock and delay
+traits. A driver, a firmware image or a vendor SDK can take it directly, supply those
+implementations, and use it without a link orchestrator or a negotiation layer above it.
+
+It implements the procedure, not policy: where implementations of HDMI sources differ, the
+behaviour is a setting with a documented default, and how often to retry is the caller's.
 
 ---
 
 ## Scope
 
-*To settle:* what is in (bring-up above 340 Mcsc; optional scrambling at or below 340 Mcsc;
-tear-down; checking `TMDS_Config` against the link and a quick restore) and what is out
-(EDID, negotiation, InfoFrames, FRL, HDCP, retry policy — one attempt and its check per
-call; how often to retry belongs to the caller).
+`spiritlevel` covers:
+
+- **Choosing the link parameters** (0.1): clock ratio, scrambling and the sink's
+  `TMDS_Config` from the character rate, the sink's and source's facts, and the policy.
+- **Bring-up** (0.2): above 340 Mcsc, writing `TMDS_Config`, starting scrambled TMDS output
+  and checking `Scrambling_Status`; at or below, the plain link or, when allowed, the
+  scrambled one. Clearing the sink's FRL settings first when the link may have been in
+  FRL. Writing `Source_Version` on an SCDC sink, when the policy says.
+- **Tear-down** (0.2): clearing the ratio and scrambling on the sink and in the source, and
+  stopping TMDS output.
+- **The reconnect check** (0.2): reading `TMDS_Config` back against the running link, and
+  the quick restore (a rewrite and a status check) when the caller chooses it over a full
+  bring-up.
+- **One attempt per call:** each call makes one attempt and its check, and reports the
+  outcome; whether and when to try again is the caller's.
+
+`spiritlevel` does not cover:
+
+- **EDID reading, sink capability parsing, mode negotiation:** its inputs come from them.
+- **FRL:** plumbob.
+- **InfoFrames and other data island packets, AVMUTE:** the packet and session layers.
+- **HDCP.**
+- **Hotplug detection and when to bring the link up or down:** the caller decides; the
+  reconnect check is a tool it calls.
+- **PHY electrical settings** (swing, pre-emphasis, lane mapping): the PHY implementation.
+- **Retry and polling schedules:** the caller's, with `spiritlevel` making one attempt per
+  call.
 
 ---
 
 ## Dependencies
 
-*To settle:* per release. 0.1: display-types at most, no hdmi-hal. 0.2: hdmi-hal (and
-hdmi-hal-async for `spiritlevel-async`) for `TmdsPhy`, the power trait, clock and delay;
-culvert behind a `culvert` feature. Why dependencies only point down the stack.
+Dependencies point only down the stack: nothing below `spiritlevel` depends on it, so a
+change here never forces a release of a lower crate.
+
+**0.1**
+
+```toml
+[dependencies]
+display-types = { version = "0.5", default-features = false }
+```
+
+display-types is the only dependency, for the `From<&HdmiForumSinkCap>` impls on
+`SinkTmdsFacts`. It is a public dependency (its type is in those impls), so a breaking
+display-types release means a breaking `spiritlevel` release; a later widening of the range
+must be checked against every version it admits. No features: the core needs neither
+`alloc` nor `std` (`ParamsError` implements `core::error::Error`).
+
+**0.2 (outline)**
+
+- hdmi-hal for `TmdsPhy`, the power trait, the clock and the delay; `spiritlevel-async`
+  takes hdmi-hal-async instead.
+- culvert behind a `culvert` feature, for the adapter that implements this crate's SCDC
+  trait (and culvert-async in `spiritlevel-async`).
 
 ---
 
@@ -277,25 +332,57 @@ implementation wraps a concrete `DelayNs`.
 
 ## `no_std`, `alloc`, and `async`
 
-*To settle:* `no_std` without `alloc` throughout; the I/O-free `async fn` core with a sync
-driver in this crate and `spiritlevel-async` driving the same core over async I/O, as
-plumbob does; the compile-time `Send` test.
+`#![no_std]` without `alloc`, in every release and every build: the same API everywhere.
+`#![forbid(unsafe_code)]`.
+
+**0.1:** the core is synchronous and pure: `TmdsLinkParams::choose` is a `const fn`, so
+there is nothing async in it. CI builds it for a bare target (`thumbv7em-none-eabi`), as the
+rest of the stack does.
+
+**0.2 (outline):** the procedures as an I/O-free `async fn` core with a sync driver in this
+crate, and `spiritlevel-async` driving the same core over async I/O, as plumbob and
+plumbob-async do; a compile-time `Send` test for the async futures.
 
 ---
 
 ## Testing
 
-*To settle:* unit tests of the core; the procedures against a register-level simulated sink
-(planned crate) with a simulated clock; conformance checks implementors of the new
-hdmi-hal traits can run.
+**0.1: the core.** Its input space is small, so the tests cover it whole:
+
+- **Every combination:** both thresholds × the two sink facts × the source fact × the
+  policy flag, at rates either side of and at 340 000 kHz; each case checked against the
+  rules, including the `ScramblingDecision` reason and `ParamsError`.
+- **The boundary:** 340 000 kHz gives 1/10 with `Above340` and 1/40 with `AtOrAbove340`;
+  340 001 kHz gives 1/40 with both.
+- **Invariants:** `sink_config()` is `None` exactly when the sink has no SCDC, and
+  otherwise matches `clock_ratio()` and `scrambling()`; `scrambling()` is true exactly for
+  `Required` and `LowRate`.
+- **`const` use:** a test evaluates `choose` and the constructors in a `const` item, so a
+  change that breaks `const fn` fails the build.
+- **`From` impls:** an `HdmiForumSinkCap` with each flag set maps to the right facts, and
+  `None` maps to `SinkTmdsFacts::NONE`.
+
+Coverage is measured in CI with a baseline, as in the other crates.
+
+**0.2 (outline):** the procedures against a register-level simulated sink (a planned crate)
+with a simulated clock; conformance checks implementors of the new hdmi-hal traits can run.
 
 ---
 
 ## Releases
 
-*To settle:* 0.1 — the I/O-free core, no hdmi-hal dependency; 0.2 — the procedures over
-`TmdsPhy` after hdmi-hal's breaking release, with `spiritlevel-async` and the `culvert`
-feature; what each release's docs promise.
+**0.1 — the link parameters.** `TmdsLinkParams::choose` and its types (Key Types), with
+the tests above. The crate docs say what 0.1 is: the decision a TMDS bring-up starts from,
+usable on its own by any source that drives the SCDC writes and its PHY itself, and that
+the procedures arrive in 0.2. It does not depend on hdmi-hal, so it can be released before
+hdmi-hal's breaking release. The repository is made public with it.
+
+**0.2 — the procedures.** Bring-up, tear-down and the reconnect check over `TmdsPhy`, the
+power trait, the clock and delay, and this crate's SCDC trait; the `culvert` feature; the
+first `spiritlevel-async`. Released after hdmi-hal's breaking release, which defines those
+traits, and after the simulated sink crate the procedures are tested with. 0.1's types may
+change in 0.2 where the procedures need it; being pre-1.0, that is a breaking minor
+release.
 
 ---
 
