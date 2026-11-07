@@ -65,15 +65,20 @@ change here never forces a release of a lower crate.
 **0.1**
 
 ```toml
+[features]
+default = ["display-types"]
+
 [dependencies]
-display-types = { version = "0.5", default-features = false }
+display-types = { version = "0.5", default-features = false, optional = true }
 ```
 
-display-types is the only dependency, for the `From<&HdmiForumSinkCap>` impls on
-`SinkTmdsFacts`. It is a public dependency (its type is in those impls), so a breaking
-display-types release means a breaking `spiritlevel` release; a later widening of the range
-must be checked against every version it admits. No features: the core needs neither
-`alloc` nor `std` (`ParamsError` implements `core::error::Error`).
+display-types is the only dependency, optional and on by default, for the
+`From<&HdmiForumSinkCap>` impls on `SinkTmdsFacts`. With it, it is a public dependency (its
+type is in those impls), so a breaking display-types release means a breaking `spiritlevel`
+release, and a later widening of the range must be checked against every version it admits.
+Without it (`default-features = false`), the crate depends on nothing: a firmware fills the
+facts itself. The core needs neither `alloc` nor `std` (`ParamsError` implements
+`core::error::Error`).
 
 **0.2 (outline)**
 
@@ -98,8 +103,8 @@ whether the link is scrambled, and what (if anything) is written to the sink's
 
 | Input               | Type (proposed)                                        | Where the caller gets it                                                                                                                            |
 |---------------------|--------------------------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------|
-| TMDS character rate | `u32`, kHz                                             | the negotiated configuration (pixel clock × deep-colour factor, halved for YCbCr 4:2:0) — the same unit the stack's negotiation layer uses          |
-| Sink facts          | `SinkTmdsFacts { scdc_present, lte_340mcsc_scramble }` | the sink's HDMI Forum capabilities (`From<&HdmiForumSinkCap>`; no HF-SCDB means neither); the caller may clear a fact for a sink known to misbehave |
+| TMDS character rate | `u32`, kHz                                             | the negotiated configuration (pixel clock × deep-colour factor, halved for YCbCr 4:2:0) — the same unit the stack's negotiation layer uses; **rounded up**, never truncated (12 bpc on a 1 kHz clock gives half kHz, and truncating 340 000.5 would pick 1/10) |
+| Sink facts          | `SinkTmdsFacts { scdc_present, scrambling_above_340, lte_340mcsc_scramble }` | the sink's HDMI Forum capabilities (`From<&HdmiForumSinkCap>`; no HF-SCDB means none); `scrambling_above_340` is SCDC present and a non-zero `Max_TMDS_Character_Rate`, as Linux derives `scrambling.supported` [11]; the caller may clear a fact for a sink known to misbehave |
 | Source fact         | `SourceTmdsFacts { low_rate_scrambling }`              | the PHY's capabilities (from 0.2 the `TmdsPhy` capabilities report; in 0.1 the caller states it)                                                    |
 | Policy              | `TmdsPolicy { low_rate_scrambling, threshold }`        | the caller; defaults below                                                                                                                          |
 
@@ -111,7 +116,8 @@ colour format, depth and pixel repetition, which is negotiation's knowledge, not
 1. **Above the threshold**, the clock ratio is 1/40 and the link is scrambled; the sink's
    `TMDS_Config` gets both `TMDS_Bit_Clock_Ratio` and `Scrambling_Enable`. Settled: every
    source examined does this — the Linux DRM helper and vc4 (one lineage), i915, dw-hdmi,
-   amdgpu, nouveau, Tegra, MediaTek v2, Xilinx and Amlogic [1], [3]–[10].
+   amdgpu, nouveau, Tegra, MediaTek v2, Xilinx and Amlogic [1], [3]–[10]. It needs a sink
+   that can take it (rule 5).
 2. **At or below the threshold**, the clock ratio is 1/10, and a source with an SCDC sink
    clears the ratio in `TMDS_Config` [1], [3]–[10].
 3. **Scrambling at or below the threshold** is on when all three allow it: the source can
@@ -119,16 +125,33 @@ colour format, depth and pixel repetition, which is negotiation's knowledge, not
    permits it. Settled for sources that can scramble at low rates: i915, amdgpu, nouveau
    and dw-hdmi enable it whenever the sink declares it [3][4][5][6]; Xilinx leaves it to
    the application, off by default [9]. The helper lineage, Tegra, MediaTek v2 and Amlogic
-   never scramble at low rates [1][2][7][8][10]; sources whose hardware cannot scramble at low
-   rates are a capability, not dissent. Hence configurable, **default on**.
+   do not scramble at low rates [1][7][8][10]: in the helper lineage it is a TODO [2], and in
+   the others nothing suggests the hardware can. Neither counts against the claim, which is
+   about sources that do scramble at low rates. Hence configurable, **default on**.
 4. **The threshold** is "above 340 Mcsc" by default; "at or above 340 Mcsc" is the
-   alternative. The sources differ: above in the helper lineage, i915, dw-hdmi, Xilinx and
-   Amlogic [1][3][4][9][10]; at or above in Tegra, MediaTek v2 and amdgpu's source
-   scrambler [7][8][5]. A majority with dissent, so configurable with the majority as
-   default. The two differ only at exactly 340 000 kHz.
-5. **Without SCDC** the sink cannot be configured: the result has no `TMDS_Config` write,
-   ratio 1/10 and no scrambling. A rate that needs scrambling (rule 1) on such a sink is
-   refused with a typed error rather than run unscrambled.
+   alternative. The sources differ: above in the helper lineage, i915, dw-hdmi, nouveau,
+   Xilinx and Amlogic [1][3][4][6][9][10]; at or above in Tegra and MediaTek v2 [7][8].
+   amdgpu is split and counted on neither side: its sink write uses "above"
+   (`link_ddc.c:575`), its own scrambler "at or above" (`dce_stream_encoder.c:621`), so at
+   exactly 340 000 kHz it scrambles without configuring the sink [5]. A majority with
+   dissent, so configurable with the majority as default. The two differ only at exactly
+   340 000 kHz. nouveau, Tegra and MediaTek v2 compare the mode's pixel clock, not the
+   character rate [6][7][8]; they are evidence for the comparison, not for how the rate is
+   computed.
+5. **A sink that cannot take scrambling above 340 Mcsc.** Scrambling above the threshold
+   needs both `scdc_present` and `scrambling_above_340`. Without SCDC the sink cannot be
+   configured at all: no `TMDS_Config` write, ratio 1/10, no scrambling.
+   - **Above 340 000 kHz** on a sink missing either fact, `choose` refuses with
+     `ParamsError::ScramblingUnsupported`, naming every missing fact. This refusal is the
+     crate's own design decision, not surveyed behaviour (the sources gate the write and
+     carry on): the stack's negotiation layer already refuses such a rate, so reaching
+     `choose` with it means the inputs disagree, and running the link unscrambled would hide
+     that.
+   - **At exactly 340 000 kHz with `AtOrAbove340`**, such a sink gets the plain 1/10 link,
+     which is a valid link at that rate under the default threshold. Chosen: Tegra enables
+     its scrambler and the sink's ratio only with SCDC [7]; MediaTek v2 differs, setting its
+     own scrambler regardless and skipping only the sink write [8]. A source scrambling
+     with an unconfigured sink is never an outcome of `choose`.
 
 **Output**
 
@@ -136,7 +159,7 @@ colour format, depth and pixel repetition, which is negotiation's knowledge, not
 `TMDS_Config` value for the sink (`None` for a sink without SCDC). The PHY takes the ratio
 and the scrambling flag (0.2, `TmdsPhy`); the SCDC trait takes the sink's value. The core
 states *what* the register holds, not its bit layout: the encoding belongs to the SCDC
-implementation (culvert's `TmdsConfig` already has it). Error: `ScramblingRequiredWithoutScdc`
+implementation (culvert's `TmdsConfig` already has it). Error: `ScramblingUnsupported`
 (rule 5). Types under "Key Types".
 
 **Open points for this step**
@@ -195,11 +218,15 @@ pub enum ScramblingThreshold {
 }
 
 /// What the sink declares (`new`; `NONE` for a sink without HDMI Forum capabilities,
-/// e.g. a DVI or HDMI 1.x sink). `From<&HdmiForumSinkCap>` and
-/// `From<Option<&HdmiForumSinkCap>>`. `lte_340mcsc_scramble` counts only with
-/// `scdc_present` (rule 5).
+/// e.g. a DVI or HDMI 1.x sink). With the `display-types` feature,
+/// `From<&HdmiForumSinkCap>` and `From<Option<&HdmiForumSinkCap>>`.
+/// `scrambling_above_340`: SCDC present and a non-zero `Max_TMDS_Character_Rate` [11].
 #[non_exhaustive]
-pub struct SinkTmdsFacts { pub scdc_present: bool, pub lte_340mcsc_scramble: bool }
+pub struct SinkTmdsFacts {
+    pub scdc_present: bool,
+    pub scrambling_above_340: bool,
+    pub lte_340mcsc_scramble: bool,
+}
 
 /// What the source's PHY can do (`new`). From 0.2 built from the `TmdsPhy` capabilities.
 #[non_exhaustive]
@@ -213,7 +240,7 @@ pub struct TmdsPolicy { pub low_rate_scrambling: bool, pub threshold: Scrambling
 /// The two fields of `TMDS_Config` (0x20), what is written and what a read returns
 /// (`new`). Its bit layout belongs to the SCDC implementation.
 #[non_exhaustive]
-pub struct SinkTmdsConfig { pub scrambling_enable: bool, pub high_clock_ratio: bool }
+pub struct SinkTmdsConfig { pub scrambling_enable: bool, pub high_tmds_clock_ratio: bool }
 
 /// Why the link is or is not scrambled.
 #[non_exhaustive]
@@ -223,14 +250,20 @@ pub enum ScramblingDecision {
     Off(ScramblingOff),   // at or below, not scrambled
 }
 
+/// Every condition that keeps a link at or below the threshold unscrambled; at least
+/// one is set. Each flag is judged on its own fact, independently of the others.
 #[non_exhaustive]
-pub enum ScramblingOff { PolicyOff, SourceCannot, SinkDoesNotDeclare, NoScdc }
+pub struct ScramblingOff {
+    pub no_scdc: bool,
+    pub sink_does_not_declare: bool,   // LTE_340Mcsc_scramble not set
+    pub source_cannot: bool,
+    pub policy_off: bool,
+}
 
 /// The chosen link. Fields are private, so the sink's value always matches the link:
-/// `clock_ratio()`, `scrambling()` (true for `Required` and `LowRate`),
+/// `rate_khz()`, `clock_ratio()`, `scrambling()` (true for `Required` and `LowRate`),
 /// `scrambling_decision()`, `sink_config() -> Option<SinkTmdsConfig>` (`None` without
-/// SCDC). Built only by `choose`.
-#[non_exhaustive]
+/// SCDC). Built only by `choose`. Not `#[non_exhaustive]`: its fields are private already.
 pub struct TmdsLinkParams { /* private */ }
 
 impl TmdsLinkParams {
@@ -245,7 +278,9 @@ impl TmdsLinkParams {
 /// `Display` and `core::error::Error`.
 #[non_exhaustive]
 pub enum ParamsError {
-    ScramblingRequiredWithoutScdc { rate_khz: u32 },   // rule 5
+    /// A rate above 340 000 kHz on a sink that cannot take scrambling (rule 5); every
+    /// missing fact is set.
+    ScramblingUnsupported { rate_khz: u32, no_scdc: bool, no_scrambling_above_340: bool },
 }
 ```
 
@@ -258,8 +293,12 @@ constructors are `const fn`, so a firmware can fix its policy and facts at compi
 - **Why `ScramblingDecision`:** an unscrambled low-rate link is not a failure, but the
   stack's diagnostics say why a choice was made; a caller expecting scrambling sees which
   of source, sink or policy declined it.
+- **Why every reason, not the first:** when several conditions block scrambling, reporting
+  one would hide facts the core knows; a diagnostic tool's user would fix one and then meet
+  the next. `ScramblingOff` and `ScramblingUnsupported` carry every condition that applies.
+  They fit in a `Copy` value without `alloc`, so there is no capacity reason to stop at one.
 - **Why the sink facts are a struct of their own,** not `HdmiForumSinkCap` directly: the
-  core needs two flags, a caller can override a misbehaving sink without editing parsed
+  core needs three flags, a caller can override a misbehaving sink without editing parsed
   EDID data, and 0.1 does not tie its API to display-types' struct beyond the `From`
   impls.
 
@@ -349,18 +388,22 @@ plumbob-async do; a compile-time `Send` test for the async futures.
 
 **0.1: the core.** Its input space is small, so the tests cover it whole:
 
-- **Every combination:** both thresholds × the two sink facts × the source fact × the
+- **Every combination:** both thresholds × the three sink facts × the source fact × the
   policy flag, at rates either side of and at 340 000 kHz; each case checked against the
-  rules, including the `ScramblingDecision` reason and `ParamsError`.
-- **The boundary:** 340 000 kHz gives 1/10 with `Above340` and 1/40 with `AtOrAbove340`;
-  340 001 kHz gives 1/40 with both.
+  rules, including the `ScramblingDecision` and `ParamsError`.
+- **The boundary:** 340 000 kHz gives 1/10 with `Above340`; with `AtOrAbove340` it gives
+  1/40 on a sink that can take scrambling and the plain 1/10 link on one that cannot;
+  340 001 kHz gives 1/40 with both, or `ScramblingUnsupported`.
+- **Every reason:** each `ScramblingOff` flag and each `ScramblingUnsupported` flag is set
+  exactly when its own fact blocks scrambling, whatever the others are.
 - **Invariants:** `sink_config()` is `None` exactly when the sink has no SCDC, and
   otherwise matches `clock_ratio()` and `scrambling()`; `scrambling()` is true exactly for
-  `Required` and `LowRate`.
+  `Required` and `LowRate`; `rate_khz()` returns the input.
 - **`const` use:** a test evaluates `choose` and the constructors in a `const` item, so a
   change that breaks `const fn` fails the build.
-- **`From` impls:** an `HdmiForumSinkCap` with each flag set maps to the right facts, and
-  `None` maps to `SinkTmdsFacts::NONE`.
+- **`From` impls:** an `HdmiForumSinkCap` with each flag set maps to the right facts
+  (`scrambling_above_340` only with SCDC and a non-zero maximum rate), and `None` maps to
+  `SinkTmdsFacts::NONE`. CI also builds and tests without default features.
 
 Coverage is measured in CI with a baseline, as in the other crates.
 
@@ -415,8 +458,9 @@ Driver source read at these commits; line numbers refer to them.
 | [3]  | i915                                | `drivers/gpu/drm/i915/display/intel_hdmi.c:2433–2435`, `2793–2795`                                                                          |
 | [4]  | dw-hdmi                             | `drivers/gpu/drm/bridge/synopsys/dw-hdmi.c:1400–1402`, `1424–1431`, `2101–2102`, `2118`                                                     |
 | [5]  | amdgpu                              | `drivers/gpu/drm/amd/display/dc/link/protocols/link_ddc.c:571–613`; `dc/core/dc_stream.c:158`; `dc/dce/dce_stream_encoder.c:621`, `629–640` |
-| [6]  | nouveau                             | `drivers/gpu/drm/nouveau/dispnv50/disp.c:800–815`                                                                                           |
-| [7]  | Tegra                               | `drivers/gpu/drm/tegra/sor.c:2175–2181`, `2198`                                                                                             |
+| [6]  | nouveau                             | `drivers/gpu/drm/nouveau/dispnv50/disp.c:797`, `800–815`                                                                                           |
+| [7]  | Tegra                               | `drivers/gpu/drm/tegra/sor.c:2165–2181`, `2202`                                                                                             |
 | [8]  | MediaTek v2                         | `drivers/gpu/drm/mediatek/mtk_hdmi_v2.c:86–100`, `746`                                                                                      |
 | [9]  | Xilinx                              | `XilinxProcessorIPLib/drivers/v_hdmitx1/src/xv_hdmitx1.c:630–635`, `742–744`; `v_hdmitxss1/src/xv_hdmitxss1.c:2938–2957`                    |
 | [10] | Amlogic                             | `drivers/media/vout/hdmitx21/hw/hdmi_tx_hw.c:668–676`, `2780–2799`, `2889–2906`                                                             |
+| [11] | Linux EDID parser                   | `drivers/gpu/drm/drm_edid.c:6340–6356` (`scrambling.supported`: SCDC present and a non-zero `Max_TMDS_Character_Rate`)                     |
