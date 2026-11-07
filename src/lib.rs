@@ -18,3 +18,7 @@
 mod error;
 mod params;
 mod types;
+
+pub use types::{
+    ClockRatio, ScramblingThreshold, SinkTmdsConfig, SinkTmdsFacts, SourceTmdsFacts, TmdsPolicy,
+};
