@@ -19,6 +19,8 @@ mod error;
 mod params;
 mod types;
 
+pub use error::ParamsError;
+pub use params::{ScramblingDecision, ScramblingOff, TmdsLinkParams};
 pub use types::{
     ClockRatio, ScramblingThreshold, SinkTmdsConfig, SinkTmdsFacts, SourceTmdsFacts, TmdsPolicy,
 };

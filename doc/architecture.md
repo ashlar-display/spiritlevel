@@ -147,8 +147,10 @@ colour format, depth and pixel repetition, which is negotiation's knowledge, not
      carry on): the stack's negotiation layer already refuses such a rate, so reaching
      `choose` with it means the inputs disagree, and running the link unscrambled would hide
      that.
-   - **At exactly 340 000 kHz with `AtOrAbove340`**, such a sink gets the plain 1/10 link,
-     which is a valid link at that rate under the default threshold. Chosen: Tegra enables
+   - **At exactly 340 000 kHz with `AtOrAbove340`**, such a sink gets the link at or below
+     the threshold would give it (1/10, scrambled only as rule 3 allows), which is a valid
+     link at that rate under the default threshold; a forced plain link would leave
+     `ScramblingOff` with no reason to report. Chosen: Tegra enables
      its scrambler and the sink's ratio only with SCDC [7]; MediaTek v2 differs, setting its
      own scrambler regardless and skipping only the sink write [8]. A source scrambling
      with an unconfigured sink is never an outcome of `choose`.
