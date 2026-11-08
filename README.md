@@ -61,14 +61,15 @@ fn main() -> Result<(), ParamsError> {
     let link = TmdsLinkParams::choose(297_000, sink, source, TmdsPolicy::DEFAULT)?;
 
     assert_eq!(link.clock_ratio(), ClockRatio::Div10);
-    if let ScramblingDecision::Off(off) = link.scrambling_decision() {
-        // Every reason is reported; here only the sink's.
-        assert!(off.sink_does_not_declare && !off.source_cannot && !off.policy_off);
-    }
+    // Not scrambled, and every reason is reported: here only the sink's.
+    assert!(matches!(
+        link.scrambling_decision(),
+        ScramblingDecision::Off(off)
+            if off.sink_does_not_declare && !off.source_cannot && !off.policy_off
+    ));
     // What the sink's TMDS_Config must hold; `None` for a sink without SCDC.
-    if let Some(config) = link.sink_config() {
-        assert!(!config.scrambling_enable && !config.high_tmds_clock_ratio);
-    }
+    let config = link.sink_config().expect("this sink has SCDC");
+    assert!(!config.scrambling_enable && !config.high_tmds_clock_ratio);
     Ok(())
 }
 ```
@@ -102,6 +103,32 @@ HDCP, hotplug detection, PHY electrical settings, and retry schedules. See
 ## Documentation
 
 - [`doc/architecture.md`](doc/architecture.md) — design, rules and their sources.
+
+## Verifying releases
+
+Releases are built on GitHub Actions and attested with
+[SLSA Build Level 2](https://slsa.dev) provenance. To verify a release `.crate` against
+its signed provenance, install the [GitHub CLI](https://cli.github.com/) and run:
+
+```sh
+gh attestation verify spiritlevel-X.Y.Z.crate --repo ashlar-display/spiritlevel
+```
+
+The attested `.crate` is attached to each
+[GitHub release](https://github.com/ashlar-display/spiritlevel/releases).
+
+0.1.0 is uploaded by the publish workflow with a crates.io API token scoped to publishing
+this new crate, because trusted publishing can only be set up for a crate already on
+crates.io; the token is revoked afterwards. Later releases are uploaded through crates.io
+[trusted publishing](https://rust-lang.github.io/rfcs/3691-trusted-publishing-cratesio.html):
+the publish workflow obtains a short-lived token via OpenID Connect instead of using a
+stored API token. Each version's publishing details, including the workflow run and
+commit, are available from the crates.io API:
+
+```sh
+curl -A "your-tool (contact)" https://crates.io/api/v1/crates/spiritlevel/X.Y.Z
+# see .version.trustpub_data
+```
 
 ## License
 
