@@ -35,7 +35,48 @@ PHY and SCDC — follow in 0.2, together with the async companion `spiritlevel-a
 
 ## Usage
 
-*To come with the 0.1 implementation.*
+```sh
+cargo add spiritlevel
+```
+
+State what the sink and the source can do, and choose the link for the TMDS character
+rate (in kHz, rounded up):
+
+```rust
+use spiritlevel::{
+    ClockRatio, ParamsError, ScramblingDecision, SinkTmdsFacts, SourceTmdsFacts,
+    TmdsLinkParams, TmdsPolicy,
+};
+
+fn main() -> Result<(), ParamsError> {
+    // From the sink's HF-SCDB (feature `display-types`): `SinkTmdsFacts::from(hf_scdb)`,
+    // where `None` is a sink without one. Or state the facts directly:
+    let sink = SinkTmdsFacts::new(
+        true,  // SCDC present
+        true,  // scrambling above 340 Mcsc
+        false, // LTE_340Mcsc_scramble
+    );
+    let source = SourceTmdsFacts::new(true); // the PHY can scramble at low rates
+
+    let link = TmdsLinkParams::choose(297_000, sink, source, TmdsPolicy::DEFAULT)?;
+
+    assert_eq!(link.clock_ratio(), ClockRatio::Div10);
+    if let ScramblingDecision::Off(off) = link.scrambling_decision() {
+        // Every reason is reported; here only the sink's.
+        assert!(off.sink_does_not_declare && !off.source_cannot && !off.policy_off);
+    }
+    // What the sink's TMDS_Config must hold; `None` for a sink without SCDC.
+    if let Some(config) = link.sink_config() {
+        assert!(!config.scrambling_enable && !config.high_tmds_clock_ratio);
+    }
+    Ok(())
+}
+```
+
+Where HDMI sources differ, `TmdsPolicy` holds the setting: whether to scramble at or
+below 340 Mcsc when both ends can (default on), and whether exactly 340 000 kHz counts as
+above the threshold (default not). A rate above 340 000 kHz on a sink that cannot take
+scrambling is refused with `ParamsError::ScramblingUnsupported`, naming every missing fact.
 
 ## Features
 
