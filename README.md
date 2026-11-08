@@ -100,7 +100,7 @@ HDCP, hotplug detection, PHY electrical settings, and retry schedules. See
 ## Documentation
 
 - [`doc/architecture.md`](doc/architecture.md) — role, scope, the rules for choosing the
-  link and their sources, the types, testing, and the release plan
+  link and their sources, the types, design principles and decisions
 - [`doc/setup.md`](doc/setup.md) — build, test, MSRV and coverage commands
 - [`CONTRIBUTING.md`](CONTRIBUTING.md) — issues, pull requests and coding standards
 
