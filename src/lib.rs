@@ -19,6 +19,11 @@ mod error;
 mod params;
 mod types;
 
+// Compiles and runs the README's examples as doctests.
+#[cfg(doctest)]
+#[doc = include_str!("../README.md")]
+struct ReadmeDoctests;
+
 pub use error::ParamsError;
 pub use params::{ScramblingDecision, ScramblingOff, TmdsLinkParams};
 pub use types::{

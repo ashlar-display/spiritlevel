@@ -40,6 +40,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   features, and `no_std` builds for `thumbv7em-none-eabi` with and without them.
 - MSRV check: `cargo msrv verify` runs the tests (with and without default features) and
   the bare `no_std` build on the `rust-version` in `Cargo.toml` (1.85).
+- The README's example is compiled and run as a doctest, so it cannot fall behind the API.
 - Coverage ratchet: CI measures line coverage against `.coverage-baseline` and opens a PR
   when it rises.
 - Weekly RustSec audit, and Dependabot for the workflow pins and `Cargo.lock`.
