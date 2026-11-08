@@ -104,4 +104,13 @@ mod tests {
              declare scrambling above 340 Mcsc"
         );
     }
+
+    #[test]
+    fn display_without_a_missing_fact_still_reads() {
+        // `choose` never returns this; a caller can still build it.
+        assert_eq!(
+            text(&message(594_000, false, false)),
+            "TMDS character rate 594000 kHz needs scrambling, but the sink cannot take it"
+        );
+    }
 }
