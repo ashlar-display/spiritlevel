@@ -12,6 +12,9 @@ keywords = ["ashlar", "hdmi", "no-std", "tmds", "scrambling"]
 categories = ["hardware-support", "embedded", "no-std", "no-std::no-alloc"]
 include = ["src/**", "doc/**", "README.md", "CHANGELOG.md", "LICENSE"]
 
+[package.metadata.docs.rs]
+all-features = true
+
 [features]
 default = ["display-types"]
 
