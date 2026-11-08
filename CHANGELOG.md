@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Internal
+
+- Releases publish through crates.io trusted publishing only: the first-publish token path
+  in publish.yml and the first-release path in release-prep, used once for 0.1.0, are
+  removed.
+
 ## [0.1.0] - 2026-11-08
 
 ### Added

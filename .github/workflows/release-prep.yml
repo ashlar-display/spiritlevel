@@ -67,10 +67,6 @@ jobs:
 
       - name: Determine bump type and new version
         id: version
-        env:
-          # crates.io's data access policy requires an identifying User-Agent and
-          # answers curl's default one with 403.
-          CRATES_IO_UA: ${{ github.repository }} release-prep workflow (https://github.com/${{ github.repository }})
         run: |
           CURRENT=$(grep '^version = ' Cargo.toml | head -1 | sed 's/version = "\(.*\)"/\1/')
           MAJOR=$(echo "$CURRENT" | cut -d. -f1)
@@ -79,27 +75,7 @@ jobs:
 
           BUMP="${{ inputs.bump }}"
 
-          # First release: there is nothing on crates.io for semver-checks to compare
-          # against, so the version in Cargo.toml is released as it stands.
-          NAME=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[0].name')
-          STATUS=$(curl -sS -A "$CRATES_IO_UA" -o /dev/null -w '%{http_code}' \
-            "https://crates.io/api/v1/crates/${NAME}")
-          case "$STATUS" in
-            200 ) FIRST=false ;;
-            404 ) FIRST=true ;;
-            * )
-              echo "::error::Unexpected HTTP $STATUS from crates.io while checking ${NAME}."
-              exit 1 ;;
-          esac
-
-          if [ "$FIRST" = true ]; then
-            if [ "$BUMP" != "auto" ]; then
-              echo "::error::${NAME} is not on crates.io yet: its first release takes the version in Cargo.toml (${CURRENT}). Run with bump 'auto'."
-              exit 1
-            fi
-            BUMP=none
-            echo "First release of ${NAME}: releasing ${CURRENT} as set in Cargo.toml."
-          elif [ "$BUMP" = "auto" ]; then
+          if [ "$BUMP" = "auto" ]; then
             echo "Running cargo semver-checks to determine required bump..."
             if cargo semver-checks --release-type patch; then
               BUMP=patch
@@ -126,7 +102,6 @@ jobs:
           fi
 
           case "$BUMP" in
-            none)  NEW="$CURRENT" ;;
             patch) NEW="${MAJOR}.${MINOR}.$((PATCH + 1))" ;;
             minor) NEW="${MAJOR}.$((MINOR + 1)).0" ;;
             major) NEW="$((MAJOR + 1)).0.0" ;;
@@ -160,8 +135,8 @@ jobs:
             echo "::error::CHANGELOG.md has no '## [Unreleased]' section — add one before releasing."
             exit 1
           fi
-          # A section for this version means it was prepared already (e.g. a first
-          # release whose publish has not run yet): run Release Tag instead.
+          # A section for this version means it was prepared already (its release
+          # PR merged, the tag not yet pushed): run Release Tag instead.
           if grep -qF "## [${NEW}]" CHANGELOG.md; then
             echo "::error::CHANGELOG.md already has a '## [${NEW}]' section — v${NEW} was prepared already; run Release Tag instead."
             exit 1
@@ -198,11 +173,6 @@ jobs:
         run: |
           NEW="${{ steps.version.outputs.new }}"
           CURRENT="${{ steps.version.outputs.current }}"
-          if [ "$CURRENT" = "$NEW" ]; then
-            VERSION_CHANGE="\`${NEW}\` (first release, unchanged)"
-          else
-            VERSION_CHANGE="\`${CURRENT}\` → \`${NEW}\`"
-          fi
           gh pr create \
             --base develop \
             --head "release/v${NEW}" \
@@ -212,7 +182,7 @@ jobs:
 
           | File | Change |
           |---|---|
-          | \`Cargo.toml\` | ${VERSION_CHANGE} |
+          | \`Cargo.toml\` | \`${CURRENT}\` → \`${NEW}\` |
           | \`CHANGELOG.md\` | \`[Unreleased]\` stamped with today's date |
           | \`Cargo.lock\` | regenerated |
 
