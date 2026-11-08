@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **The README shows the "trusted publishing only" badge**: crates.io refuses token
+  uploads for this crate, and "Verifying releases" says so.
+
 ### Internal
 
 - Releases publish through crates.io trusted publishing only: the first-publish token path
