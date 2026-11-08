@@ -394,7 +394,8 @@ plumbob-async do; a compile-time `Send` test for the async futures.
   policy flag, at rates either side of and at 340 000 kHz; each case checked against the
   rules, including the `ScramblingDecision` and `ParamsError`.
 - **The boundary:** 340 000 kHz gives 1/10 with `Above340`; with `AtOrAbove340` it gives
-  1/40 on a sink that can take scrambling and the plain 1/10 link on one that cannot;
+  1/40 on a sink that can take scrambling, and on one that cannot the link at or below
+  the threshold would give (rule 5);
   340 001 kHz gives 1/40 with both, or `ScramblingUnsupported`.
 - **Every reason:** each `ScramblingOff` flag and each `ScramblingUnsupported` flag is set
   exactly when its own fact blocks scrambling, whatever the others are.
