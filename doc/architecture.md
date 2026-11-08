@@ -1,13 +1,13 @@
 # Architecture
 
-This document describes `spiritlevel` 0.1: what it decides, the rules it follows and where
+This document describes `spiritlevel` as released: what it decides, the rules it follows and where
 they come from, its types, and the decisions behind them. Claims about HDMI behaviour cite
 at least two independent public implementations of HDMI sources (see "Sources").
 
 ## Role
 
-`spiritlevel` is the TMDS link bring-up crate of an HDMI source. Release 0.1 is its first
-step: deciding, without any I/O, what a TMDS link will be. From the TMDS character rate,
+`spiritlevel` is the TMDS link bring-up crate of an HDMI source. What it provides today is
+the first step: deciding, without any I/O, what a TMDS link will be. From the TMDS character rate,
 what the sink and the source can do, and the caller's policy, it decides the link's bit
 clock ratio (1/10 or 1/40), whether the link is scrambled and why, and what the sink's
 `TMDS_Config` register must hold.
@@ -15,7 +15,7 @@ clock ratio (1/10 or 1/40), whether the link is scrambled and why, and what the 
 The decision is a pure `const fn`. A driver, a firmware image or a vendor SDK can use it on
 its own: the caller programs its PHY with the ratio and the scrambling flag and writes the
 sink's `TMDS_Config` itself. The procedures that do this over a PHY and SCDC are planned
-for 0.2 (see "What comes next").
+(see the [roadmap](roadmap.md)).
 
 TMDS and FRL are separate link modes with separate procedures. FRL link training is
 [plumbob](https://github.com/ashlar-display/plumbob)'s; `spiritlevel` is its counterpart for
@@ -28,7 +28,7 @@ behaviour is a setting with a documented default.
 
 ## Scope
 
-`spiritlevel` 0.1 covers:
+`spiritlevel` covers:
 
 - **Choosing the link parameters:** the clock ratio, scrambling and the sink's
   `TMDS_Config` contents, from the character rate, the sink's and source's facts, and the
@@ -43,7 +43,7 @@ It does not cover:
 - **Checking the rate against the TMDS maximum** or the sink's, source's and cable's
   ceilings: the negotiation layer checks those before a link is chosen.
 - **EDID reading and parsing:** the sink facts come from the parsed HDMI Forum capabilities.
-- **The I/O:** programming the PHY and writing the sink's SCDC registers (planned for 0.2).
+- **The I/O:** programming the PHY and writing the sink's SCDC registers (planned; see the [roadmap](roadmap.md)).
 - **FRL:** plumbob.
 - **InfoFrames and other data island packets, AVMUTE, HDCP, hotplug detection, PHY
   electrical settings, retry schedules.**
@@ -234,7 +234,7 @@ firmware can fix its policy and facts at compile time.
 ## `no_std`, `alloc`, and `async`
 
 `#![no_std]` without `alloc` in every build, and `#![forbid(unsafe_code)]`. `choose` is
-synchronous and pure, a `const fn`, so there is nothing async in 0.1. CI builds the crate
+synchronous and pure, a `const fn`, so there is nothing async in it. CI builds the crate
 for a bare target (`thumbv7em-none-eabi`) with and without default features, and checks the
 MSRV (Rust 1.85).
 
@@ -317,11 +317,8 @@ baseline.
 
 ## What comes next
 
-Release 0.2 is planned to add the procedures that carry out the decision: bring-up,
-tear-down and a reconnect check, over hdmi-hal's PHY, power, clock and delay traits and a
-small SCDC trait of the crate's own, with an adapter for culvert behind a feature, and an
-async companion crate, `spiritlevel-async`. 0.1's types may change where the procedures
-need it; before 1.0 that is a breaking minor release, listed in the changelog.
+The procedures that carry out the decision, the interfaces they need, an async companion
+crate, and what is under consideration are on the [roadmap](roadmap.md).
 
 ---
 

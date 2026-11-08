@@ -21,9 +21,10 @@ or is not scrambled is reported.
 
 ## Status
 
-Release 0.1 is the link parameters alone: a pure, I/O-free, `const` function with no
-hardware dependency. The procedures — bring-up, tear-down and the reconnect check over the
-PHY and SCDC — follow in 0.2, together with the async companion `spiritlevel-async`.
+`spiritlevel` currently provides the link parameters alone: a pure, I/O-free, `const`
+function with no hardware dependency. The procedures — bring-up, tear-down and the
+reconnect check over the PHY and SCDC — are planned, together with the async companion
+`spiritlevel-async`; see the [roadmap](doc/roadmap.md).
 
 ## Usage
 
@@ -87,8 +88,8 @@ which trains FRL links: beside it in the stack, not on top of it. A link orchest
 chooses between them.
 
 Below it, [display-types](https://github.com/ashlar-display/display-types) supplies the
-sink's HDMI Forum capabilities (the `display-types` feature). From 0.2 the procedures also
-use [hdmi-hal](https://github.com/ashlar-display/hdmi-hal) for the PHY and, behind a
+sink's HDMI Forum capabilities (the `display-types` feature). The planned procedures will
+also use [hdmi-hal](https://github.com/ashlar-display/hdmi-hal) for the PHY and, behind a
 feature, [culvert](https://github.com/ashlar-display/culvert) for SCDC.
 
 ## Out of scope
@@ -101,6 +102,7 @@ HDCP, hotplug detection, PHY electrical settings, and retry schedules. See
 
 - [`doc/architecture.md`](doc/architecture.md) — role, scope, the rules for choosing the
   link and their sources, the types, design principles and decisions
+- [`doc/roadmap.md`](doc/roadmap.md) — what is planned and under consideration
 - [`doc/setup.md`](doc/setup.md) — build, test, MSRV and coverage commands
 - [`CONTRIBUTING.md`](CONTRIBUTING.md) — issues, pull requests and coding standards
 
