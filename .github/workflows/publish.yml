@@ -119,16 +119,26 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Cache cargo-msrv
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      # Restore and save are separate steps so the binary is cached as soon as it is
+      # built: a combined cache step saves only when the whole job succeeds, so while the
+      # MSRV is broken every run would rebuild cargo-msrv.
+      - name: Restore cargo-msrv
+        id: msrv-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cargo/bin/cargo-msrv
           key: ${{ runner.os }}-cargo-msrv-${{ env.CARGO_MSRV_VERSION }}
 
       - name: Install cargo-msrv
-        run: |
-          command -v cargo-msrv \
-            || cargo install cargo-msrv --version "${CARGO_MSRV_VERSION}" --locked
+        if: steps.msrv-cache.outputs.cache-hit != 'true'
+        run: cargo install cargo-msrv --version "${CARGO_MSRV_VERSION}" --locked
+
+      - name: Save cargo-msrv
+        if: steps.msrv-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cargo/bin/cargo-msrv
+          key: ${{ runner.os }}-cargo-msrv-${{ env.CARGO_MSRV_VERSION }}
 
       - name: Verify MSRV (test)
         run: cargo msrv verify --output-format minimal -- cargo test --locked

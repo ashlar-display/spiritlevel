@@ -48,4 +48,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Release workflows (release-prep, release-tag, publish) as in the other crates, with a
   first-release path: release-prep releases the version in `Cargo.toml` when the crate is
   not on crates.io yet, and publish uses a first-publish token where trusted publishing
-  is not yet possible. publish's verify and MSRV jobs mirror CI.
+  is not yet possible. release-prep refuses a version that is already tagged or already
+  has a CHANGELOG section. publish's verify and MSRV jobs mirror CI.

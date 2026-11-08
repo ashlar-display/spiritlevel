@@ -132,6 +132,16 @@ jobs:
             major) NEW="$((MAJOR + 1)).0.0" ;;
           esac
 
+          # A version already tagged is released or being released: a failed publish is
+          # re-run from its Publish run, not prepared again.
+          # Assigned first, so a failing ls-remote stops the step (bash -e) instead of
+          # reading as "no tag".
+          TAG_REF=$(git ls-remote --tags origin "refs/tags/v${NEW}")
+          if [ -n "$TAG_REF" ]; then
+            echo "::error::Tag v${NEW} already exists — finish that release (re-run its Publish run) instead of preparing it again."
+            exit 1
+          fi
+
           echo "current=$CURRENT" >> "$GITHUB_OUTPUT"
           echo "new=$NEW" >> "$GITHUB_OUTPUT"
           echo "bump=$BUMP" >> "$GITHUB_OUTPUT"
@@ -148,6 +158,12 @@ jobs:
           TODAY=$(date -u +%Y-%m-%d)
           if ! grep -q '^## \[Unreleased\]' CHANGELOG.md; then
             echo "::error::CHANGELOG.md has no '## [Unreleased]' section — add one before releasing."
+            exit 1
+          fi
+          # A section for this version means it was prepared already (e.g. a first
+          # release whose publish has not run yet): run Release Tag instead.
+          if grep -qF "## [${NEW}]" CHANGELOG.md; then
+            echo "::error::CHANGELOG.md already has a '## [${NEW}]' section — v${NEW} was prepared already; run Release Tag instead."
             exit 1
           fi
           # Insert the new versioned header immediately after [Unreleased], leaving
@@ -182,6 +198,11 @@ jobs:
         run: |
           NEW="${{ steps.version.outputs.new }}"
           CURRENT="${{ steps.version.outputs.current }}"
+          if [ "$CURRENT" = "$NEW" ]; then
+            VERSION_CHANGE="\`${NEW}\` (first release, unchanged)"
+          else
+            VERSION_CHANGE="\`${CURRENT}\` → \`${NEW}\`"
+          fi
           gh pr create \
             --base develop \
             --head "release/v${NEW}" \
@@ -191,7 +212,7 @@ jobs:
 
           | File | Change |
           |---|---|
-          | \`Cargo.toml\` | \`${CURRENT}\` → \`${NEW}\` |
+          | \`Cargo.toml\` | ${VERSION_CHANGE} |
           | \`CHANGELOG.md\` | \`[Unreleased]\` stamped with today's date |
           | \`Cargo.lock\` | regenerated |
 
