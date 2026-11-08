@@ -1,0 +1,22 @@
+[package]
+name = "spiritlevel"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+description = "TMDS link bring-up for HDMI sources: clock ratio, scrambling and sink configuration"
+readme = "README.md"
+license = "MPL-2.0"
+repository = "https://github.com/ashlar-display/spiritlevel"
+homepage = "https://ashlar-display.org"
+keywords = ["ashlar", "hdmi", "no-std", "tmds", "scrambling"]
+categories = ["hardware-support", "embedded", "no-std", "no-std::no-alloc"]
+include = ["src/**", "doc/**", "README.md", "CHANGELOG.md", "LICENSE"]
+
+[package.metadata.docs.rs]
+all-features = true
+
+[features]
+default = ["display-types"]
+
+[dependencies]
+display-types = { version = "0.5", default-features = false, optional = true }
