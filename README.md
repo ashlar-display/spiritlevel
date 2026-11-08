@@ -9,16 +9,7 @@
 
 > **Part of [Ashlar](https://ashlar-display.org)** — a display connection stack in Rust,
 > HDMI 2.1 first: from EDID parsing through mode negotiation to FRL link training.
->
-> [display-types](https://github.com/ashlar-display/display-types) ·
-> [piaf](https://github.com/ashlar-display/piaf) ·
-> [concordance](https://github.com/ashlar-display/concordance) ·
-> [cartouche](https://github.com/ashlar-display/cartouche) ·
-> [culvert](https://github.com/ashlar-display/culvert) ·
-> [plumbob](https://github.com/ashlar-display/plumbob) ·
-> **spiritlevel** ·
-> [hdmi-hal](https://github.com/ashlar-display/hdmi-hal) ·
-> [hdmi-hal-i2c-dev](https://github.com/ashlar-display/hdmi-hal-i2c-dev)
+> See [all crates](https://ashlar-display.org/crates.html).
 
 TMDS link bring-up for HDMI sources.
 
@@ -94,6 +85,11 @@ scrambling is refused with `ParamsError::ScramblingUnsupported`, naming every mi
 `spiritlevel` is the TMDS counterpart of [plumbob](https://github.com/ashlar-display/plumbob),
 which trains FRL links: beside it in the stack, not on top of it. A link orchestrator
 chooses between them.
+
+Below it, [display-types](https://github.com/ashlar-display/display-types) supplies the
+sink's HDMI Forum capabilities (the `display-types` feature). From 0.2 the procedures also
+use [hdmi-hal](https://github.com/ashlar-display/hdmi-hal) for the PHY and, behind a
+feature, [culvert](https://github.com/ashlar-display/culvert) for SCDC.
 
 ## Out of scope
 
