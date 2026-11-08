@@ -5,6 +5,7 @@
 [![docs.rs](https://docs.rs/spiritlevel/badge.svg)](https://docs.rs/spiritlevel)
 [![License: MPL-2.0](https://img.shields.io/badge/license-MPL--2.0-blue.svg)](LICENSE)
 [![Rust 1.85+](https://img.shields.io/badge/rustc-1.85+-orange.svg)](https://blog.rust-lang.org/2025/02/20/Rust-1.85.0.html)
+[![SLSA Level 2](https://slsa.dev/images/gh-badge-level2.svg)](https://slsa.dev)
 
 > **Part of [Ashlar](https://ashlar-display.org)** — a display connection stack in Rust,
 > HDMI 2.1 first: from EDID parsing through mode negotiation to FRL link training.
@@ -102,7 +103,10 @@ HDCP, hotplug detection, PHY electrical settings, and retry schedules. See
 
 ## Documentation
 
-- [`doc/architecture.md`](doc/architecture.md) — design, rules and their sources.
+- [`doc/architecture.md`](doc/architecture.md) — role, scope, the rules for choosing the
+  link and their sources, the types, testing, and the release plan
+- [`doc/setup.md`](doc/setup.md) — build, test, MSRV and coverage commands
+- [`CONTRIBUTING.md`](CONTRIBUTING.md) — issues, pull requests and coding standards
 
 ## Verifying releases
 
