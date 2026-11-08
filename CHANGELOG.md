@@ -37,7 +37,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Internal
 
 - CI: format, clippy and docs with `-D warnings`, tests with and without default
-  features, and `no_std` builds for `thumbv7em-none-eabi` with and without them.
+  features, and `no_std` builds for `thumbv7em-none-eabi` with and without them, with a
+  read-only token except where the coverage job opens its PR.
 - MSRV check: `cargo msrv verify` runs the tests (with and without default features) and
   the bare `no_std` build on the `rust-version` in `Cargo.toml` (1.85).
 - The README's example is compiled and run as a doctest, so it cannot fall behind the API.
