@@ -7,14 +7,17 @@ use core::fmt;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ParamsError {
     /// The rate is above 340 000 kHz, so the link must be scrambled, but the sink cannot
-    /// take scrambling there. Every missing fact is set; at least one is.
+    /// take scrambling. Every missing fact is set; at least one is.
+    #[non_exhaustive]
     ScramblingUnsupported {
         /// The TMDS character rate asked for, in kHz.
         rate_khz: u32,
         /// The sink has no SCDC, so its `TMDS_Config` cannot be written.
         no_scdc: bool,
-        /// The sink does not declare scrambling above 340 Mcsc.
-        no_scrambling_above_340: bool,
+        /// The sink does not support scrambling
+        /// ([`SinkTmdsFacts::scrambling_supported`](crate::SinkTmdsFacts::scrambling_supported)
+        /// is clear).
+        no_scrambling_support: bool,
     },
 }
 
@@ -24,18 +27,16 @@ impl fmt::Display for ParamsError {
             Self::ScramblingUnsupported {
                 rate_khz,
                 no_scdc,
-                no_scrambling_above_340,
+                no_scrambling_support,
             } => {
                 write!(
                     f,
                     "TMDS character rate {rate_khz} kHz needs scrambling, but the sink"
                 )?;
-                match (no_scdc, no_scrambling_above_340) {
-                    (true, true) => {
-                        f.write_str(" has no SCDC and does not declare scrambling above 340 Mcsc")
-                    }
+                match (no_scdc, no_scrambling_support) {
+                    (true, true) => f.write_str(" has no SCDC and does not support scrambling"),
                     (true, false) => f.write_str(" has no SCDC"),
-                    (false, true) => f.write_str(" does not declare scrambling above 340 Mcsc"),
+                    (false, true) => f.write_str(" does not support scrambling"),
                     (false, false) => f.write_str(" cannot take it"),
                 }
             }
@@ -75,11 +76,11 @@ mod tests {
         buf
     }
 
-    fn message(rate_khz: u32, no_scdc: bool, no_scrambling_above_340: bool) -> Buf {
+    fn message(rate_khz: u32, no_scdc: bool, no_scrambling_support: bool) -> Buf {
         render(ParamsError::ScramblingUnsupported {
             rate_khz,
             no_scdc,
-            no_scrambling_above_340,
+            no_scrambling_support,
         })
     }
 
@@ -92,7 +93,7 @@ mod tests {
         assert_eq!(
             text(&message(594_000, true, true)),
             "TMDS character rate 594000 kHz needs scrambling, but the sink has no SCDC \
-             and does not declare scrambling above 340 Mcsc"
+             and does not support scrambling"
         );
         assert_eq!(
             text(&message(594_000, true, false)),
@@ -101,13 +102,14 @@ mod tests {
         assert_eq!(
             text(&message(340_001, false, true)),
             "TMDS character rate 340001 kHz needs scrambling, but the sink does not \
-             declare scrambling above 340 Mcsc"
+             support scrambling"
         );
     }
 
     #[test]
     fn display_without_a_missing_fact_still_reads() {
-        // `choose` never returns this; a caller can still build it.
+        // `choose` never returns this, and the variant is `#[non_exhaustive]`, so only
+        // this crate can build it; the message still reads.
         assert_eq!(
             text(&message(594_000, false, false)),
             "TMDS character rate 594000 kHz needs scrambling, but the sink cannot take it"

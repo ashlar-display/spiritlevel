@@ -38,10 +38,12 @@ pub enum ScramblingThreshold {
 pub struct SinkTmdsFacts {
     /// The sink has an SCDC (`SCDC_Present`), so its `TMDS_Config` can be written.
     pub scdc_present: bool,
-    /// The sink can take scrambling above 340 Mcsc: SCDC present and a non-zero
-    /// `Max_TMDS_Character_Rate`, as Linux derives it.
-    pub scrambling_above_340: bool,
-    /// The sink can take scrambling at or below 340 Mcsc (`LTE_340Mcsc_scramble`).
+    /// The sink supports scrambling: SCDC present and a non-zero
+    /// `Max_TMDS_Character_Rate`, as Linux derives `scrambling.supported`. Scrambling at
+    /// any rate needs it.
+    pub scrambling_supported: bool,
+    /// The sink declares scrambling at or below 340 Mcsc (`LTE_340Mcsc_scramble`). It
+    /// counts only with SCDC and [`scrambling_supported`](Self::scrambling_supported).
     pub lte_340mcsc_scramble: bool,
 }
 
@@ -53,12 +55,12 @@ impl SinkTmdsFacts {
     #[must_use]
     pub const fn new(
         scdc_present: bool,
-        scrambling_above_340: bool,
+        scrambling_supported: bool,
         lte_340mcsc_scramble: bool,
     ) -> Self {
         Self {
             scdc_present,
-            scrambling_above_340,
+            scrambling_supported,
             lte_340mcsc_scramble,
         }
     }
@@ -66,7 +68,7 @@ impl SinkTmdsFacts {
 
 #[cfg(feature = "display-types")]
 impl From<&display_types::cea861::HdmiForumSinkCap> for SinkTmdsFacts {
-    /// `scrambling_above_340` is `scdc_present` and a non-zero `max_tmds_rate_mhz`;
+    /// `scrambling_supported` is `scdc_present` and a non-zero `max_tmds_rate_mhz`;
     /// the other two facts are copied.
     fn from(cap: &display_types::cea861::HdmiForumSinkCap) -> Self {
         Self::new(
@@ -184,7 +186,7 @@ mod tests {
     fn sink_facts_new_keeps_field_order() {
         let f = SinkTmdsFacts::new(true, false, true);
         assert!(f.scdc_present);
-        assert!(!f.scrambling_above_340);
+        assert!(!f.scrambling_supported);
         assert!(f.lte_340mcsc_scramble);
     }
 
@@ -268,15 +270,24 @@ mod tests {
 
         #[test]
         fn every_combination() {
-            for scdc in [false, true] {
-                for max_mhz in [0, 600] {
-                    for lte in [false, true] {
-                        let f = SinkTmdsFacts::from(&cap(scdc, max_mhz, lte));
-                        assert_eq!(f.scdc_present, scdc);
-                        assert_eq!(f.scrambling_above_340, scdc && max_mhz != 0);
-                        assert_eq!(f.lte_340mcsc_scramble, lte);
-                    }
-                }
+            // (SCDC_Present, Max_TMDS_Character_Rate in MHz, LTE_340Mcsc_scramble)
+            //   → (scdc_present, scrambling_supported, lte_340mcsc_scramble)
+            let table = [
+                ((false, 0, false), (false, false, false)),
+                ((false, 0, true), (false, false, true)),
+                ((false, 600, false), (false, false, false)),
+                ((false, 600, true), (false, false, true)),
+                ((true, 0, false), (true, false, false)),
+                ((true, 0, true), (true, false, true)),
+                ((true, 600, false), (true, true, false)),
+                ((true, 600, true), (true, true, true)),
+            ];
+            for ((scdc, max_mhz, lte), (f_scdc, f_supported, f_lte)) in table {
+                assert_eq!(
+                    SinkTmdsFacts::from(&cap(scdc, max_mhz, lte)),
+                    SinkTmdsFacts::new(f_scdc, f_supported, f_lte),
+                    "{scdc} {max_mhz} {lte}"
+                );
             }
         }
 

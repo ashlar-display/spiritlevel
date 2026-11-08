@@ -53,7 +53,7 @@ fn main() -> Result<(), ParamsError> {
     // where `None` is a sink without one. Or state the facts directly:
     let sink = SinkTmdsFacts::new(
         true,  // SCDC present
-        true,  // scrambling above 340 Mcsc
+        true,  // scrambling supported (non-zero Max_TMDS_Character_Rate)
         false, // LTE_340Mcsc_scramble
     );
     let source = SourceTmdsFacts::new(true); // the PHY can scramble at low rates

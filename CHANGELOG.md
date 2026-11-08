@@ -17,10 +17,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `TMDS_Config` must hold (`SinkTmdsConfig`, `None` for a sink without SCDC).
 - `ScramblingDecision` — why the link is or is not scrambled: `Required` above the
   threshold, `LowRate` at or below it, or `Off` with a `ScramblingOff` carrying every
-  condition that applies (no SCDC, the sink does not declare `LTE_340Mcsc_scramble`, the
-  source cannot, the policy is off).
+  condition that applies (no SCDC, no scrambling support, the sink does not declare
+  `LTE_340Mcsc_scramble`, the source cannot, the policy is off).
 - `ParamsError::ScramblingUnsupported` — a rate above 340 000 kHz on a sink without SCDC
-  or that does not declare scrambling above 340 Mcsc, naming every missing fact.
+  or scrambling support, naming every missing fact.
 
 **Inputs**
 
