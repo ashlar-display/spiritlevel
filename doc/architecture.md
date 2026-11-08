@@ -1,7 +1,9 @@
 # Architecture
 
-> **Skeleton.** Each section states what it will settle; none is filled in yet. Claims about
-> HDMI behaviour will cite at least two independent public implementations when written.
+> **Status.** "Choosing the link parameters" and its types under "Key Types" are settled:
+> they are release 0.1. The sections marked *To settle* are 0.2 work and state what they
+> will settle. Claims about HDMI behaviour cite at least two independent public
+> implementations (see "Sources").
 
 ## Role
 
@@ -101,7 +103,7 @@ whether the link is scrambled, and what (if anything) is written to the sink's
 
 **Inputs**
 
-| Input               | Type (proposed)                                        | Where the caller gets it                                                                                                                            |
+| Input               | Type                                                   | Where the caller gets it                                                                                                                            |
 |---------------------|--------------------------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------|
 | TMDS character rate | `u32`, kHz                                             | the negotiated configuration (pixel clock × deep-colour factor, halved for YCbCr 4:2:0) — the same unit the stack's negotiation layer uses; **rounded up**, never truncated (12 bpc on a 1 kHz clock gives half kHz, and truncating 340 000.5 would pick 1/10) |
 | Sink facts          | `SinkTmdsFacts { scdc_present, scrambling_supported, lte_340mcsc_scramble }` | the sink's HDMI Forum capabilities (`From<&HdmiForumSinkCap>`; no HF-SCDB means none); `scrambling_supported` is SCDC present and a non-zero `Max_TMDS_Character_Rate`, as Linux derives `scrambling.supported` [11]; the caller may clear a fact for a sink known to misbehave |
