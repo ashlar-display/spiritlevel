@@ -315,10 +315,10 @@ async fn write_sink<Io: TmdsIo, F: FnMut(TmdsEvent)>(
         }
         let read = io.read_tmds_config().await;
         match &read {
-            Ok(config) => emit(
+            Ok(reading) => emit(
                 io,
                 record,
-                TmdsEventKind::TmdsConfigRead { config: *config },
+                TmdsEventKind::TmdsConfigRead { reading: *reading },
             ),
             Err(e) => emit(
                 io,
@@ -1321,7 +1321,7 @@ mod tests {
                 stage: WriteStage::Write,
                 read_back: Some(Ok(read)),
                 ..
-            }) if read == SinkTmdsConfig::new(true, true) && read.raw() == Some(0x03)
+            }) if read.config == SinkTmdsConfig::new(true, true) && read.raw == 0x03
         ));
     }
 

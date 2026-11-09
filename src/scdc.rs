@@ -9,7 +9,7 @@
 use hdmi_hal::ddc::DdcError;
 
 use crate::error::UpdateError;
-use crate::types::{ScramblingStatus, SinkTmdsConfig};
+use crate::types::{ScramblingStatus, SinkTmdsConfig, TmdsConfigReading};
 
 /// The sink's SCDC registers, as the TMDS procedures use them.
 ///
@@ -22,7 +22,7 @@ use crate::types::{ScramblingStatus, SinkTmdsConfig};
 /// | The scrambling check | [`read_scrambling_status`](Self::read_scrambling_status) |
 ///
 /// The bit layout of each register is the implementation's: it decodes what it reads into
-/// [`SinkTmdsConfig::from_read`] and [`ScramblingStatus::new`], keeping the byte.
+/// [`TmdsConfigReading`] and [`ScramblingStatus`], keeping the byte.
 ///
 /// # Errors
 ///
@@ -50,8 +50,8 @@ pub trait TmdsScdc {
         config: SinkTmdsConfig,
     ) -> Result<(), UpdateError<Self::Error>>;
 
-    /// Reads `TMDS_Config` (0x20), keeping the byte read ([`SinkTmdsConfig::raw`]).
-    fn read_tmds_config(&mut self) -> Result<SinkTmdsConfig, Self::Error>;
+    /// Reads `TMDS_Config` (0x20), keeping the byte read ([`TmdsConfigReading::raw`]).
+    fn read_tmds_config(&mut self) -> Result<TmdsConfigReading, Self::Error>;
 
     /// Reads `Scrambling_Status` (0x21), keeping the byte read ([`ScramblingStatus::raw`]).
     fn read_scrambling_status(&mut self) -> Result<ScramblingStatus, Self::Error>;
@@ -137,11 +137,10 @@ mod tests {
                 .map_err(UpdateError::Write)
         }
 
-        fn read_tmds_config(&mut self) -> Result<SinkTmdsConfig, DdcErrorKind> {
+        fn read_tmds_config(&mut self) -> Result<TmdsConfigReading, DdcErrorKind> {
             let raw = self.read(0x20)?;
-            Ok(SinkTmdsConfig::from_read(
-                raw & 0x01 != 0,
-                raw & 0x02 != 0,
+            Ok(TmdsConfigReading::new(
+                SinkTmdsConfig::new(raw & 0x01 != 0, raw & 0x02 != 0),
                 raw,
             ))
         }
@@ -198,8 +197,8 @@ mod tests {
             .unwrap();
         assert_eq!(sink.regs[0x20], 0xF3, "reserved bits kept");
         let read = sink.read_tmds_config().unwrap();
-        assert_eq!(read, SinkTmdsConfig::new(true, true));
-        assert_eq!(read.raw(), Some(0xF3));
+        assert_eq!(read.config, SinkTmdsConfig::new(true, true));
+        assert_eq!(read.raw, 0xF3);
         sink.write_tmds_config(SinkTmdsConfig::new(true, false))
             .unwrap();
         assert_eq!(sink.regs[0x20], 0x01, "whole byte written");

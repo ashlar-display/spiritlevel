@@ -13,7 +13,7 @@ use hdmi_hal::time::Timestamp;
 use crate::error::UpdateError;
 use crate::event::{CancelPoint, TmdsStep};
 use crate::params::TmdsLinkParams;
-use crate::types::SinkTmdsConfig;
+use crate::types::TmdsConfigReading;
 
 /// How a bring-up ended without an error.
 #[non_exhaustive]
@@ -76,7 +76,7 @@ pub enum BringUpWarning<S> {
         /// On a plain link, the register read back after the failure, or the read's error;
         /// `None` on other links, which the check covers, and when the cancel flag stopped
         /// the bring-up before the read.
-        read_back: Option<Result<SinkTmdsConfig, S>>,
+        read_back: Option<Result<TmdsConfigReading, S>>,
     },
     /// The output started later after the sink's write than the deadline allows.
     #[non_exhaustive]
@@ -313,9 +313,10 @@ pub enum ReconnectCheck<S> {
     Matches,
     /// The sink lost its `TMDS_Config`: it holds `read`, not what the link needs. The way
     /// back is the caller's: a tear-down and a bring-up, or the quick restore.
+    #[non_exhaustive]
     Lost {
         /// The register as read, with its byte.
-        read: crate::types::SinkTmdsConfig,
+        read: TmdsConfigReading,
     },
     /// The read failed; nothing was decided.
     Unreadable(S),
@@ -445,7 +446,7 @@ mod tests {
 
     #[test]
     fn reconnect_kinds_keep_the_result_and_drop_the_value() {
-        let read = crate::types::SinkTmdsConfig::from_read(false, false, 0x80);
+        let read = TmdsConfigReading::new(crate::types::SinkTmdsConfig::new(false, false), 0x80);
         assert_eq!(
             ReconnectCheck::<DdcErrorKind>::Unreadable(DdcErrorKind::Detached).kinds(),
             ReconnectCheck::Unreadable(DdcErrorKind::Detached)

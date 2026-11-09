@@ -12,7 +12,7 @@ use hdmi_hal::ddc::{DdcError, DdcErrorKind};
 
 use crate::error::UpdateError;
 use crate::scdc::TmdsScdc;
-use crate::types::{ScramblingStatus, SinkTmdsConfig};
+use crate::types::{ScramblingStatus, SinkTmdsConfig, TmdsConfigReading};
 
 /// culvert's error, as [`TmdsScdc`] for `culvert::Scdc<T>` returns it.
 ///
@@ -64,11 +64,13 @@ impl<T: ScdcTransport> TmdsScdc for Scdc<T> {
         Scdc::update_tmds_config(self, config(sink)).map_err(update_error)
     }
 
-    fn read_tmds_config(&mut self) -> Result<SinkTmdsConfig, Self::Error> {
+    fn read_tmds_config(&mut self) -> Result<TmdsConfigReading, Self::Error> {
         let reading = Scdc::read_tmds_config(self)?;
-        Ok(SinkTmdsConfig::from_read(
-            reading.config.scrambling_enable,
-            reading.config.high_tmds_clock_ratio,
+        Ok(TmdsConfigReading::new(
+            SinkTmdsConfig::new(
+                reading.config.scrambling_enable,
+                reading.config.high_tmds_clock_ratio,
+            ),
             reading.raw,
         ))
     }
@@ -183,8 +185,8 @@ mod tests {
 
         TmdsScdc::update_tmds_config(&mut scdc, SinkTmdsConfig::new(true, true)).unwrap();
         let read = TmdsScdc::read_tmds_config(&mut scdc).unwrap();
-        assert_eq!(read, SinkTmdsConfig::new(true, true));
-        assert_eq!(read.raw(), Some(0xF3));
+        assert_eq!(read.config, SinkTmdsConfig::new(true, true));
+        assert_eq!(read.raw, 0xF3);
         let status = TmdsScdc::read_scrambling_status(&mut scdc).unwrap();
         assert!(status.set);
         assert_eq!(status.raw(), 0x81);

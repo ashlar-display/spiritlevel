@@ -14,7 +14,7 @@ use hdmi_hal::time::Timestamp;
 
 use super::TmdsIo;
 use crate::error::UpdateError;
-use crate::types::{ScramblingStatus, SinkTmdsConfig};
+use crate::types::{ScramblingStatus, SinkTmdsConfig, TmdsConfigReading};
 
 /// Polls `future` to completion. The double's I/O completes at once, so one poll does.
 pub fn block_on<F: Future>(future: F) -> F::Output {
@@ -156,10 +156,13 @@ impl TmdsIo for TestIo {
         })
     }
 
-    async fn read_tmds_config(&mut self) -> Result<SinkTmdsConfig, DdcErrorKind> {
+    async fn read_tmds_config(&mut self) -> Result<TmdsConfigReading, DdcErrorKind> {
         self.scdc(Op::ReadTmdsConfig)?;
         let raw = self.tmds_config;
-        Ok(SinkTmdsConfig::from_read(raw & 1 != 0, raw & 2 != 0, raw))
+        Ok(TmdsConfigReading::new(
+            SinkTmdsConfig::new(raw & 1 != 0, raw & 2 != 0),
+            raw,
+        ))
     }
 
     async fn read_scrambling_status(&mut self) -> Result<ScramblingStatus, DdcErrorKind> {
@@ -255,7 +258,7 @@ mod tests {
             io.update_tmds_config(SinkTmdsConfig::new(true, true))
                 .await
                 .unwrap();
-            assert_eq!(io.read_tmds_config().await.unwrap().raw(), Some(0x03));
+            assert_eq!(io.read_tmds_config().await.unwrap().raw, 0x03);
             assert!(io.read_scrambling_status().await.unwrap().set);
             assert_eq!(io.read_sink_version().await, Ok(1));
             io.write_source_version(1).await.unwrap();

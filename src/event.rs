@@ -18,7 +18,7 @@ use crate::config::{BringUpConfig, SinkPresence, TearDownConfig};
 use crate::outcome::{ReconnectCheck, SinkClear};
 use crate::params::TmdsLinkParams;
 use crate::types::ClockRatio;
-use crate::types::{SinkTmdsConfig, SinkTmdsFacts};
+use crate::types::{SinkTmdsConfig, SinkTmdsFacts, TmdsConfigReading};
 
 /// The most events one bring-up records: its start; two each for the FRL clear and
 /// `Source_Version`; one for stopping the output; two for the sink's `TMDS_Config` (the write
@@ -222,7 +222,7 @@ pub enum TmdsEventKind {
     #[non_exhaustive]
     TmdsConfigRead {
         /// The register as read, with its byte.
-        config: SinkTmdsConfig,
+        reading: TmdsConfigReading,
     },
     /// A reconnect check ended.
     #[non_exhaustive]

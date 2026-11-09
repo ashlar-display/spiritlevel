@@ -1,7 +1,6 @@
 //! The inputs and register contents: `ClockRatio`, `ScramblingThreshold`, `SinkTmdsFacts`,
-//! `SourceTmdsFacts`, `TmdsPolicy`, `SinkTmdsConfig` and `ScramblingStatus`.
-
-use core::hash::{Hash, Hasher};
+//! `SourceTmdsFacts`, `TmdsPolicy`, `SinkTmdsConfig`, `TmdsConfigReading` and
+//! `ScramblingStatus`.
 
 /// The TMDS bit clock ratio, hdmi-hal's `TmdsClockRatio`: the TMDS clock runs at the bit
 /// rate divided by 10 or by 40. One type, so the link parameters pass straight to
@@ -225,64 +224,47 @@ impl Default for TmdsPolicy {
 }
 
 /// The two fields of the sink's `TMDS_Config` (SCDC offset 0x20): what is written, and
-/// what a read returns.
+/// what a read decodes to.
 ///
-/// The bit layout belongs to the SCDC implementation. A value that came from a read keeps
-/// the byte it was decoded from ([`raw`](Self::raw)), so a sink that sets reserved bits
-/// stays visible to a diagnostic tool. The byte is diagnostic only: equality and hashing
-/// compare the two fields, so a value read back equals the one that was written.
+/// The bit layout belongs to the SCDC implementation. A read keeps the byte it decoded
+/// beside this value, in [`TmdsConfigReading`].
 #[non_exhaustive]
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct SinkTmdsConfig {
     /// `Scrambling_Enable`.
     pub scrambling_enable: bool,
     /// `TMDS_Bit_Clock_Ratio`: set for 1/40, clear for 1/10.
     pub high_tmds_clock_ratio: bool,
-    raw: Option<u8>,
 }
 
 impl SinkTmdsConfig {
-    /// The register's contents, as the caller builds them: no byte read.
+    /// The register's two fields.
     #[must_use]
     pub const fn new(scrambling_enable: bool, high_tmds_clock_ratio: bool) -> Self {
         Self {
             scrambling_enable,
             high_tmds_clock_ratio,
-            raw: None,
         }
-    }
-
-    /// The register's contents as an SCDC implementation decoded them from `raw`, the
-    /// byte it read.
-    #[must_use]
-    pub const fn from_read(scrambling_enable: bool, high_tmds_clock_ratio: bool, raw: u8) -> Self {
-        Self {
-            scrambling_enable,
-            high_tmds_clock_ratio,
-            raw: Some(raw),
-        }
-    }
-
-    /// The byte this value was decoded from, or `None` for one the caller built.
-    #[must_use]
-    pub const fn raw(&self) -> Option<u8> {
-        self.raw
     }
 }
 
-impl PartialEq for SinkTmdsConfig {
-    fn eq(&self, other: &Self) -> bool {
-        self.scrambling_enable == other.scrambling_enable
-            && self.high_tmds_clock_ratio == other.high_tmds_clock_ratio
-    }
+/// What a read of the sink's `TMDS_Config` returned: the two fields the SCDC
+/// implementation decoded, and the byte as read, reserved bits included, so a sink that
+/// sets them stays visible to a diagnostic tool.
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct TmdsConfigReading {
+    /// The two fields.
+    pub config: SinkTmdsConfig,
+    /// The byte as read.
+    pub raw: u8,
 }
 
-impl Eq for SinkTmdsConfig {}
-
-impl Hash for SinkTmdsConfig {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.scrambling_enable.hash(state);
-        self.high_tmds_clock_ratio.hash(state);
+impl TmdsConfigReading {
+    /// The fields an SCDC implementation decoded from `raw`, the byte it read.
+    #[must_use]
+    pub const fn new(config: SinkTmdsConfig, raw: u8) -> Self {
+        Self { config, raw }
     }
 }
 
@@ -368,22 +350,14 @@ mod tests {
     }
 
     #[test]
-    fn sink_config_keeps_the_byte_read_without_comparing_it() {
-        let built = SinkTmdsConfig::new(true, true);
-        let read = SinkTmdsConfig::from_read(true, true, 0xA3);
-        assert_eq!(built.raw(), None);
-        assert_eq!(read.raw(), Some(0xA3));
-        assert_eq!(read, built);
-        assert_ne!(read, SinkTmdsConfig::from_read(true, false, 0xA3));
-
-        extern crate std;
-        use std::collections::hash_map::DefaultHasher;
-        let hash = |c: &SinkTmdsConfig| {
-            let mut h = DefaultHasher::new();
-            c.hash(&mut h);
-            h.finish()
-        };
-        assert_eq!(hash(&read), hash(&built));
+    fn a_reading_keeps_the_byte_beside_the_fields() {
+        const BOTH: SinkTmdsConfig = SinkTmdsConfig::new(true, true);
+        let reading = TmdsConfigReading::new(BOTH, 0xA3);
+        assert_eq!(reading.config, BOTH);
+        assert_eq!(reading.raw, 0xA3);
+        assert_ne!(reading, TmdsConfigReading::new(BOTH, 0x03));
+        // The fields compare structurally, so a const is a pattern, as in 0.1.
+        assert!(matches!(reading.config, BOTH));
     }
 
     #[test]
@@ -402,8 +376,8 @@ mod tests {
             .with_low_rate_scrambling(false)
             .with_threshold(ScramblingThreshold::AtOrAbove340);
         const CONFIG: SinkTmdsConfig = SinkTmdsConfig::new(false, true);
-        const READ: SinkTmdsConfig = SinkTmdsConfig::from_read(false, true, 0x02);
-        const { assert!(READ.high_tmds_clock_ratio) };
+        const READ: TmdsConfigReading = TmdsConfigReading::new(CONFIG, 0x02);
+        const { assert!(READ.config.high_tmds_clock_ratio && READ.raw == 0x02) };
         const { assert!(SINK.scdc_present && !SOURCE.low_rate_scrambling) };
         const { assert!(!POLICY.low_rate_scrambling && CONFIG.high_tmds_clock_ratio) };
     }

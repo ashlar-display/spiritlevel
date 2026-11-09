@@ -19,7 +19,7 @@ use crate::outcome::{
 use crate::params::TmdsLinkParams;
 use crate::procedure::{self, TmdsIo};
 use crate::scdc::TmdsScdc;
-use crate::types::{ScramblingStatus, SinkTmdsConfig, SinkTmdsFacts};
+use crate::types::{ScramblingStatus, SinkTmdsConfig, SinkTmdsFacts, TmdsConfigReading};
 
 /// A flag the caller sets to stop a procedure: read before each step, wait and poll.
 ///
@@ -272,7 +272,7 @@ impl<S: TmdsScdc, P: TmdsPhy, K: Clock, D: Delay, X: Cancel> TmdsIo for SyncIo<'
         self.0.scdc.update_tmds_config(config)
     }
 
-    async fn read_tmds_config(&mut self) -> Result<SinkTmdsConfig, S::Error> {
+    async fn read_tmds_config(&mut self) -> Result<TmdsConfigReading, S::Error> {
         self.0.scdc.read_tmds_config()
     }
 
@@ -361,9 +361,12 @@ mod tests {
             self.write_tmds_config(c).map_err(UpdateError::Write)
         }
 
-        fn read_tmds_config(&mut self) -> Result<SinkTmdsConfig, DdcErrorKind> {
+        fn read_tmds_config(&mut self) -> Result<TmdsConfigReading, DdcErrorKind> {
             let raw = self.tmds_config;
-            Ok(SinkTmdsConfig::from_read(raw & 1 != 0, raw & 2 != 0, raw))
+            Ok(TmdsConfigReading::new(
+                SinkTmdsConfig::new(raw & 1 != 0, raw & 2 != 0),
+                raw,
+            ))
         }
 
         fn read_scrambling_status(&mut self) -> Result<ScramblingStatus, DdcErrorKind> {
@@ -612,7 +615,7 @@ mod tests {
             io.update_tmds_config(SinkTmdsConfig::new(true, false))
                 .await
                 .unwrap();
-            assert_eq!(io.read_tmds_config().await.unwrap().raw(), Some(1));
+            assert_eq!(io.read_tmds_config().await.unwrap().raw, 1);
             assert!(io.read_scrambling_status().await.unwrap().set);
             assert_eq!(io.read_sink_version().await, Ok(1));
             io.write_source_version(1).await.unwrap();

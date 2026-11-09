@@ -493,13 +493,15 @@ pub struct TmdsPolicy {
 #[non_exhaustive]
 pub enum TmdsConfigGate { AnyScdcSink /* default */, ScramblingSink }
 
-/// The two fields of `TMDS_Config` (0x20), what is written and what a read returns
-/// (`new`). Its bit layout belongs to the SCDC implementation. A value an SCDC
-/// implementation decoded (`from_read`) keeps the byte read (`raw()`), so reserved bits a
-/// sink sets stay visible; equality and hashing compare the two fields only, so a value
-/// read back equals the one written.
+/// The two fields of `TMDS_Config` (0x20), what is written and what a read decodes to
+/// (`new`). Its bit layout belongs to the SCDC implementation.
 #[non_exhaustive]
 pub struct SinkTmdsConfig { pub scrambling_enable: bool, pub high_tmds_clock_ratio: bool }
+
+/// A read of `TMDS_Config`: the two fields and the byte as read (`new`), so reserved bits a
+/// sink sets stay visible.
+#[non_exhaustive]
+pub struct TmdsConfigReading { pub config: SinkTmdsConfig, pub raw: u8 }
 
 /// Why the link is or is not scrambled.
 #[non_exhaustive]
@@ -645,7 +647,7 @@ pub enum BringUpWarning<S> {
     TmdsConfigWriteFailed {
         error: S,
         stage: WriteStage,                                   // Read: nothing was written
-        read_back: Option<Result<SinkTmdsConfig, S>>,        // a plain link's read-back
+        read_back: Option<Result<TmdsConfigReading, S>>,     // a plain link's read-back
     },
     DeadlineMissed { by: Duration },
 }
@@ -689,7 +691,7 @@ pub enum SinkClear<S> { NotRequested, NothingToClear, SkippedSinkGone, Cleared, 
 
 #[non_exhaustive]
 pub enum ReconnectCheck<S> {
-    Matches, Lost { read: SinkTmdsConfig }, Unreadable(S), NotApplicable, SinkChanged,
+    Matches, Lost { read: TmdsConfigReading }, Unreadable(S), NotApplicable, SinkChanged,
 }
 
 #[non_exhaustive]
@@ -722,7 +724,7 @@ pub trait TmdsScdc {
     type Error: hdmi_hal::ddc::DdcError;
     fn write_tmds_config(&mut self, config: SinkTmdsConfig) -> Result<(), Self::Error>;
     fn update_tmds_config(&mut self, config: SinkTmdsConfig) -> Result<(), UpdateError<Self::Error>>;
-    fn read_tmds_config(&mut self) -> Result<SinkTmdsConfig, Self::Error>;
+    fn read_tmds_config(&mut self) -> Result<TmdsConfigReading, Self::Error>;
     fn read_scrambling_status(&mut self) -> Result<ScramblingStatus, Self::Error>;
     fn read_sink_version(&mut self) -> Result<u8, Self::Error>;
     fn write_source_version(&mut self, version: u8) -> Result<(), Self::Error>;
@@ -763,7 +765,7 @@ helpers, or a test double implements eight methods rather than a whole register 
 `ScdcTransport`. Its error, `CulvertError<E>`, wraps culvert's `ScdcError<E>`: its kind is
 the transport's own for a transport error, and `Unsupported` for a request culvert refuses,
 which would be refused again. `update_tmds_config` uses culvert's own read-modify-write, and
-the bytes read reach `SinkTmdsConfig::raw` and `ScramblingStatus::raw`.
+the bytes read reach `TmdsConfigReading::raw` and `ScramblingStatus::raw`.
 
 ---
 

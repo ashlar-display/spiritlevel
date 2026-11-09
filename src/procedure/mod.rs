@@ -24,7 +24,7 @@ use hdmi_hal::phy::TmdsPhyConfig;
 use hdmi_hal::time::Timestamp;
 
 use crate::error::UpdateError;
-use crate::types::{ScramblingStatus, SinkTmdsConfig};
+use crate::types::{ScramblingStatus, SinkTmdsConfig, TmdsConfigReading};
 
 /// The I/O a procedure makes, flattened into one trait: the sink's SCDC registers as
 /// [`TmdsScdc`](crate::TmdsScdc) has them, the PHY's four I/O methods as `TmdsPhy` has them,
@@ -46,7 +46,7 @@ pub trait TmdsIo {
         config: SinkTmdsConfig,
     ) -> Result<(), UpdateError<Self::ScdcError>>;
     /// See [`TmdsScdc::read_tmds_config`](crate::TmdsScdc::read_tmds_config).
-    async fn read_tmds_config(&mut self) -> Result<SinkTmdsConfig, Self::ScdcError>;
+    async fn read_tmds_config(&mut self) -> Result<TmdsConfigReading, Self::ScdcError>;
     /// See [`TmdsScdc::read_scrambling_status`](crate::TmdsScdc::read_scrambling_status).
     async fn read_scrambling_status(&mut self) -> Result<ScramblingStatus, Self::ScdcError>;
     /// See [`TmdsScdc::read_sink_version`](crate::TmdsScdc::read_sink_version).

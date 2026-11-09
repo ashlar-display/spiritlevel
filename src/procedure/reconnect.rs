@@ -45,8 +45,8 @@ pub async fn check_reconnect<Io: TmdsIo, F: FnMut(TmdsEvent)>(
     } else if let Some(expected) = link.sink_config() {
         match io.read_tmds_config().await {
             Ok(read) => {
-                emit(io, TmdsEventKind::TmdsConfigRead { config: read });
-                if read == expected {
+                emit(io, TmdsEventKind::TmdsConfigRead { reading: read });
+                if read.config == expected {
                     ReconnectCheck::Matches
                 } else {
                     ReconnectCheck::Lost { read }
@@ -133,15 +133,11 @@ mod tests {
         let mut io = TestIo::new();
         io.tmds_config = 0x80; // both bits 0, a reserved bit set
         let (result, ..) = check(&mut io, &link(594_000, SINK), SINK);
-        assert_eq!(
+        assert!(matches!(
             result,
-            ReconnectCheck::Lost {
-                read: SinkTmdsConfig::new(false, false)
-            }
-        );
-        if let ReconnectCheck::Lost { read } = result {
-            assert_eq!(read.raw(), Some(0x80));
-        }
+            ReconnectCheck::Lost { read }
+                if read.config == SinkTmdsConfig::new(false, false) && read.raw == 0x80
+        ));
     }
 
     #[test]

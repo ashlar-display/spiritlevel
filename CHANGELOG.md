@@ -28,10 +28,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `choose` checks it first and refuses a rate above it with the new
   `ParamsError::AboveSourceMaximum { rate_khz, max_khz }`, so a link the source cannot drive
   never gets a sink configuration. `new` sets `u32::MAX`, so 0.1's results do not change.
-- **The SCDC vocabulary the procedures will use.** `SinkTmdsConfig::from_read` builds a
-  value an SCDC implementation decoded from a byte, which `raw()` keeps (`None` for one the
-  caller built); equality and hashing compare the two fields only, so a value read back
-  equals the one written. `ScramblingStatus` is what the sink reports in
+- **The SCDC vocabulary of the procedures.** `TmdsConfigReading` is what a read of
+  `TMDS_Config` returns: the two fields an SCDC implementation decoded, as a
+  `SinkTmdsConfig`, and the byte as read (`raw`), so a sink that sets reserved bits stays
+  visible. `ScramblingStatus` is what the sink reports in
   `Scrambling_Status`, with the byte read (`raw()`). `UpdateError<E>` (`Read` or `Write`) is
   the error of an operation made of a read and a write, saying which failed.
 - **`TmdsScdc`**, the sink-side SCDC operations the procedures make: `TMDS_Config` written
