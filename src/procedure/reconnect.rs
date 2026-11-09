@@ -72,7 +72,7 @@ pub async fn check_reconnect<Io: TmdsIo, F: FnMut(TmdsEvent)>(
 
     emit(
         io,
-        TmdsEventKind::ReconnectChecked {
+        TmdsEventKind::ReconnectCheckEnded {
             result: result.kinds(),
         },
     );
@@ -124,7 +124,7 @@ mod tests {
         assert_eq!(count, MAX_RECONNECT_CHECK_EVENTS);
         assert_eq!(
             last,
-            Some(TmdsEventKind::ReconnectChecked {
+            Some(TmdsEventKind::ReconnectCheckEnded {
                 result: ReconnectCheck::Matches
             })
         );

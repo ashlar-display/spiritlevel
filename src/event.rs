@@ -226,7 +226,7 @@ pub enum TmdsEventKind {
     },
     /// A reconnect check ended.
     #[non_exhaustive]
-    ReconnectChecked {
+    ReconnectCheckEnded {
         /// What it found, with an error's kind in place of the error.
         result: ReconnectCheck<DdcErrorKind>,
     },
