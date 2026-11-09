@@ -68,8 +68,8 @@ type RestoreResult<S, P> = Result<
 /// cancel flag ([`NoCancel`] unless [`with_cancel`](Self::with_cancel) gives one).
 ///
 /// Each procedure runs to completion before it returns: the parts' calls complete at once,
-/// and the delay blocks. One clock-and-delay value can serve as both through a reference,
-/// as `Clock` and `Delay` implemented for `&T`.
+/// and the delay blocks. One clock-and-delay value can serve as both: implement `Clock` and
+/// `Delay` for a reference to it, and pass the reference twice.
 #[derive(Debug)]
 pub struct TmdsLink<S, P, K, D, X = NoCancel> {
     scdc: S,

@@ -145,9 +145,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   bring-up and tear-down over the four parts (compiled as a doctest), lists the `culvert`
   feature, and no longer says the crate has no dependencies without `display-types`; the
   roadmap keeps what is still to come.
-- **`doc/architecture.md` describes the link choice as it now is** (the source's scrambler
-  and maximum rate, the `TMDS_Config` gate, hdmi-hal's clock ratio, the dependencies); 
-  each reason a user needs is with the rule it explains.
+- **`doc/architecture.md` describes the procedures**: each step with its settings, defaults
+  and sources, cancellation, the settings and result types, `TmdsScdc` and the culvert
+  adapter, the events and their bounds, and what the procedures use from hdmi-hal and how a
+  caller drives them. The link choice is brought up to date (the source's scrambler and
+  maximum rate, the `TMDS_Config` gate, hdmi-hal's clock ratio, the dependencies), with
+  each reason a user needs next to the rule it explains.
 - **The README shows the "trusted publishing only" badge**: crates.io refuses token
   uploads for this crate, and "Verifying releases" says so.
 

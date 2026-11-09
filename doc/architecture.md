@@ -442,6 +442,8 @@ between them would leave the sink and the source disagreeing. A cancelled check 
 
 ## Key Types
 
+### Choosing the link
+
 ```rust
 /// The TMDS bit clock ratio: the TMDS clock runs at the bit rate / 10 or / 40.
 /// Exhaustive: `TMDS_Bit_Clock_Ratio` is one bit. hdmi-hal's type, so the link's ratio
@@ -561,40 +563,392 @@ and is described with them.
   decision needs three flags, a caller can override a misbehaving sink without editing
   parsed EDID data, and the API is tied to display-types only through the `From` impls.
 
+### The procedures' settings
+
+```rust
+/// Bring-up's and the quick restore's settings. `Default`/`DEFAULT`; a `with_…` setter
+/// for each; the quick restore reads `tmds_config_write`, `on_tmds_config_failure` and
+/// the check's two timings.
+#[non_exhaustive]
+pub struct BringUpConfig {
+    pub ratio_wait: Duration,                          // 1 ms
+    pub scrambling_deadline: Duration,                 // 100 ms
+    pub check_window: Duration,                        // 200 ms
+    pub check_interval: Duration,                      // 1 ms
+    pub clear_frl: ClearFrl,                           // IfSinkDeclaresFrl
+    pub source_version: SourceVersionWrite,            // EveryBringUp
+    pub output_during_sink_write: OutputDuringSinkWrite, // Stopped
+    pub tmds_config_write: TmdsConfigWrite,            // ReadModifyWrite
+    pub on_tmds_config_failure: OnTmdsConfigFailure,   // CarryOn
+    pub tear_down_on_error: bool,                      // true
+    pub tear_down: TearDownConfig,                     // used after an error or a cancel
+}
+impl BringUpConfig {
+    /// A deadline shorter than the wait, or an interval longer than the window.
+    pub const fn validate(&self) -> Result<(), ConfigError>;
+}
+
+#[non_exhaustive]
+pub struct TearDownConfig {
+    pub clear_sink: bool,                   // false
+    pub sink_clear_timing: SinkClearTiming, // BeforeOutputStops
+    pub scrambler_off: ScramblerOff,        // AfterSink
+}
+
+#[non_exhaustive] pub enum OutputDuringSinkWrite { Stopped, Running }
+#[non_exhaustive] pub enum TmdsConfigWrite { ReadModifyWrite, WholeByte }
+#[non_exhaustive] pub enum OnTmdsConfigFailure { CarryOn, Stop }
+#[non_exhaustive] pub enum ClearFrl { IfSinkDeclaresFrl, EveryScdcSink }
+#[non_exhaustive] pub enum SourceVersionWrite { EveryBringUp, IfSinkVersion1, WhenScrambling, Never }
+#[non_exhaustive] pub enum SinkClearTiming { BeforeOutputStops, AfterOutputStops }
+#[non_exhaustive] pub enum ScramblerOff { AfterSink, BeforeSink }
+/// Tear-down's argument: whether the sink is still there. Exhaustive.
+pub enum SinkPresence { Present, Gone }
+
+/// Every problem `validate` found; `Display` and `core::error::Error`.
+#[non_exhaustive]
+pub struct ConfigError { pub deadline_shorter_than_wait: bool, pub interval_longer_than_window: bool }
+```
+
+All are `Copy`, every setter is a `const fn`, so firmware fixes its settings at compile time.
+
+### The procedures' results
+
+`S` is the SCDC error (`TmdsScdc::Error`), `P` the PHY error (`TmdsPhy::Error`).
+
+```rust
+#[non_exhaustive]
+pub enum BringUpOutcome<S, P> {
+    Up(LinkUp<S>),
+    #[non_exhaustive]
+    Cancelled { at: CancelPoint, cleanup: Cleanup<S, P>, warnings: Warnings<S> },
+}
+
+#[non_exhaustive]
+pub struct LinkUp<S> {
+    pub link: TmdsLinkParams,
+    pub sink_written_at: Option<Timestamp>,   // None: no write was due
+    pub output_started_at: Timestamp,
+    pub check: ScramblingCheck<S>,            // never CheckResult::Cancelled
+    pub warnings: Warnings<S>,
+}
+
+/// Each kind at most once per bring-up.
+#[non_exhaustive]
+pub enum BringUpWarning<S> {
+    FrlRateClearFailed(S),
+    FltUpdateClearFailed(S),
+    SinkVersionReadFailed(S),
+    SourceVersionWriteFailed(S),
+    TmdsConfigWriteFailed {
+        error: S,
+        stage: WriteStage,                                   // Read: nothing was written
+        read_back: Option<Result<SinkTmdsConfig, S>>,        // a plain link's read-back
+    },
+    DeadlineMissed { by: Duration },
+}
+
+/// Fixed storage for the warnings, in the order they came: `iter`, `len`, `is_empty`.
+pub struct Warnings<S> { /* private */ }
+
+#[non_exhaustive]
+pub enum BringUpError<S, P> {
+    Scdc { step: TmdsStep, error: S, output: OutputState, cleanup: Cleanup<S, P>, warnings: Warnings<S> },
+    Phy { step: TmdsStep, error: P, output: OutputState, cleanup: Cleanup<S, P>, warnings: Warnings<S> },
+}
+
+#[non_exhaustive]
+pub enum Cleanup<S, P> {
+    TornDown(Result<TornDown<S>, TearDownError<S, P>>),
+    Skipped,   // tear_down_on_error off, or a cancel seen at entry
+}
+
+pub enum OutputState { Stopped, MayBeRunning }   // exhaustive
+pub enum WriteStage { Read, Write }              // exhaustive
+
+#[non_exhaustive]
+pub struct ScramblingCheck<S> {
+    pub result: CheckResult,
+    pub reads: u32,
+    pub failed_reads: u32,
+    pub first_error: Option<FailedRead<S>>,   // { error, after }
+    pub set_after: Option<Duration>,          // from the check's start
+    pub read_cap_reached: bool,
+}
+#[non_exhaustive]
+pub enum CheckResult { NotApplicable, Set, NotSet, Unreadable, Cancelled }
+
+#[non_exhaustive] pub struct TornDown<S> { pub sink: SinkClear<S> }
+/// At least one PHY step failed; each field holds that step's error.
+#[non_exhaustive]
+pub struct TearDownError<S, P> { pub sink: SinkClear<S>, pub scrambler: Option<P>, pub output: Option<P> }
+#[non_exhaustive]
+pub enum SinkClear<S> { NotRequested, NothingToClear, SkippedSinkGone, Cleared, Failed(S) }
+
+#[non_exhaustive]
+pub enum ReconnectCheck<S> {
+    Matches, Lost { read: SinkTmdsConfig }, Unreadable(S), NotApplicable, SinkChanged,
+}
+
+#[non_exhaustive]
+pub struct Restored<S> {
+    pub sink_written_at: Option<Timestamp>,
+    pub check: ScramblingCheck<S>,
+    pub write_failed: Option<UpdateError<S>>,
+}
+#[non_exhaustive]
+pub enum RestoreError<S, P> {
+    Scdc(UpdateError<S>),
+    Phy { error: P, sink_written_at: Option<Timestamp>, write_failed: Option<UpdateError<S>> },
+}
+```
+
+All are `Debug, Clone, Copy, PartialEq, Eq` where `S` and `P` are. The warnings live in fixed
+storage, one slot per kind, so an outcome needs no `alloc`.
+
+- **Why `Cancelled` is an outcome, not an error:** the caller asked for it, and the link
+  was torn down as asked.
+- **Why the check is part of `LinkUp`, not a condition of it:** the link is up and running
+  whatever the sink reports; the result tells the caller whether to repeat, and how soon.
+- **Why the errors carry the warnings and the cleanup:** a caller that only sees the error
+  still learns everything that happened before it.
+
+### The SCDC trait
+
+```rust
+pub trait TmdsScdc {
+    type Error: hdmi_hal::ddc::DdcError;
+    fn write_tmds_config(&mut self, config: SinkTmdsConfig) -> Result<(), Self::Error>;
+    fn update_tmds_config(&mut self, config: SinkTmdsConfig) -> Result<(), UpdateError<Self::Error>>;
+    fn read_tmds_config(&mut self) -> Result<SinkTmdsConfig, Self::Error>;
+    fn read_scrambling_status(&mut self) -> Result<ScramblingStatus, Self::Error>;
+    fn read_sink_version(&mut self) -> Result<u8, Self::Error>;
+    fn write_source_version(&mut self, version: u8) -> Result<(), Self::Error>;
+    fn clear_frl_rate(&mut self) -> Result<(), Self::Error>;
+    fn clear_flt_update(&mut self) -> Result<bool, UpdateError<Self::Error>>;   // whether it was set
+}
+
+/// An operation of a read and a write, and which failed. `Display`, `core::error::Error`.
+#[non_exhaustive]
+pub enum UpdateError<E> { Read(E), Write(E) }
+
+/// What the sink reports in `Scrambling_Status` (0x21), with the byte read (`raw()`).
+#[non_exhaustive]
+pub struct ScramblingStatus { pub set: bool /* , raw: private */ }
+```
+
+The sink-side operations the procedures make, and nothing more:
+
+- **`write_tmds_config`** writes the whole byte, the two bits as given and the others 0;
+  **`update_tmds_config`** reads `TMDS_Config`, sets the two bits and writes the byte back
+  with the others as read, writing nothing after a failed read. The bit layout is the
+  implementation's, so the read-modify-write is too.
+- **`clear_frl_rate`** writes `Config_1` (0x31) as 0, `FRL_Rate` and `FFE_Levels` both, as
+  amdgpu and Amlogic do [37].
+- **`clear_flt_update`** reads `Update_0` (0x10) and, when `FLT_update` is set, writes it
+  back as 1, which clears it, as both sources do [37]; the other flags belong to whoever
+  reads them next, such as a link health monitor. Two methods, so the bring-up can say which
+  register's clear failed.
+- **The error is a `DdcError`**, whose kind tells a failure that will not pass (`Detached`,
+  `Unsupported`) from one that may; the procedures poll through the second and stop on the
+  first. An implementation over an `ScdcTransport` passes its errors through.
+
+It is the crate's own trait, not culvert's client, so a change to it touches only this crate,
+and a firmware with its own SCDC code, a kernel driver whose platform already has SCDC
+helpers, or a test double implements eight methods rather than a whole register map.
+
+**The culvert adapter** (`culvert` feature): `TmdsScdc` for `culvert::Scdc<T>` over any
+`ScdcTransport`. Its error, `CulvertError<E>`, wraps culvert's `ScdcError<E>`: its kind is
+the transport's own for a transport error, and `Unsupported` for a request culvert refuses,
+which would be refused again. `update_tmds_config` uses culvert's own read-modify-write, and
+the bytes read reach `SinkTmdsConfig::raw` and `ScramblingStatus::raw`.
+
+---
+
+## Diagnostics
+
+Each procedure has a plain form and a `_with_events` form that calls `FnMut(TmdsEvent)` with
+every step (`bring_up` and `bring_up_with_events`, and so on). A callback needs no buffer, so
+nothing overflows and the API is the same in every build; a caller that wants a list pushes
+each event into its own. There is no logging.
+
+```rust
+#[non_exhaustive]
+pub struct TmdsEvent {
+    pub at: Timestamp,          // from the procedure's own clock
+    pub kind: TmdsEventKind,    // #[non_exhaustive], and each variant too
+}
+```
+
+- **Stamped by the procedure,** from the clock it already holds: the timing is the point
+  (the write, the wait, output start, the check).
+- **One kind per step and per decision**, with the values written or read: the start, with
+  the link and the settings in force; each step done (the FRL clear, `Sink_Version` read,
+  `Source_Version` written, output stopped, `TMDS_Config` written or read, the PHY
+  configured, the scrambler set, the wait spent, output started); each step skipped, with
+  the rule that skipped it (`FrlClearSkip`, `SourceVersionSkip`, `TmdsConfigSkip`,
+  `SinkClearSkip`); each step failed, with its `TmdsStep`, whether it ends the procedure, and
+  for SCDC the error's `DdcErrorKind`; a missed deadline; the check, **one event per window**
+  with what `ScramblingCheck` records; a cancellation, with its `CancelPoint`; and the end.
+- **No error values,** only their kinds: the values stay in the outcome or the error, which
+  own them, so neither error type has to be `Clone`, and `TmdsEvent` is `Copy` with no type
+  parameters, so an embedded caller can send it through a channel.
+- **Events explain outcomes:** every warning is also an event, and nothing in an outcome is
+  missing from the events, so a tool that only listens can explain every result.
+
+**A fixed maximum per procedure,** since every step records at most one event per call and
+the check one per window: `MAX_BRING_UP_EVENTS` (which includes the tear-down after an error
+or a cancel), `MAX_TEAR_DOWN_EVENTS`, `MAX_RECONNECT_CHECK_EVENTS` and
+`MAX_QUICK_RESTORE_EVENTS`. A caller without `alloc` sizes its channel or buffer from them and
+never drops an event.
+
+---
+
+## Interface Boundaries
+
+### The core and the sync driver
+
+```rust
+// spiritlevel::procedure: the core, written once as async fns
+#[allow(async_fn_in_trait)]
+pub trait TmdsIo {
+    type ScdcError: hdmi_hal::ddc::DdcError;
+    type PhyError: core::fmt::Debug;
+    // `TmdsScdc`'s eight methods and `TmdsPhy`'s four I/O methods, as `async fn`
+    fn now(&self) -> Timestamp;
+    async fn delay(&mut self, duration: Duration);
+    fn cancelled(&self) -> bool;
+}
+pub async fn bring_up<Io: TmdsIo, F: FnMut(TmdsEvent)>(
+    io: &mut Io, link: &TmdsLinkParams, video: TmdsVideo, config: &BringUpConfig, record: &mut F,
+) -> Result<BringUpOutcome<Io::ScdcError, Io::PhyError>, BringUpError<Io::ScdcError, Io::PhyError>>;
+// tear_down(io, link, config, presence, record), check_reconnect(io, link, current_sink, record),
+// quick_restore(io, link, config, record)
+
+// spiritlevel: the sync driver
+pub struct TmdsLink<S, P, K, D, X = NoCancel> { /* the five parts */ }
+impl<S: TmdsScdc, P: TmdsPhy, K: Clock, D: Delay> TmdsLink<S, P, K, D, NoCancel> {
+    pub fn new(scdc: S, phy: P, clock: K, delay: D) -> Self;
+}
+impl<S: TmdsScdc, P: TmdsPhy, K: Clock, D: Delay, X: Cancel> TmdsLink<S, P, K, D, X> {
+    pub fn with_cancel<X2: Cancel>(self, cancel: X2) -> TmdsLink<S, P, K, D, X2>;
+    pub fn bring_up(&mut self, link: &TmdsLinkParams, video: TmdsVideo, config: &BringUpConfig) -> …;
+    // bring_up_with_events, tear_down(_with_events), check_reconnect(_with_events),
+    // quick_restore(_with_events)
+    pub fn into_parts(self) -> (S, P, K, D, X);
+}
+
+pub trait Cancel { fn is_cancelled(&self) -> bool; }   // for &AtomicBool and NoCancel
+```
+
+- **`TmdsIo` flattens the I/O** into one trait, so the core sees one bound and a test drives
+  it through one double; a driver implements it over its parts. `TmdsLink` is that driver for
+  sync parts: their calls complete at once, so it polls the core's future to completion
+  without a runtime, and the `Delay` blocks inside it. An async driver awaits the same
+  futures.
+- **`Cancel` is a trait,** not a bare `&AtomicBool`, so the driver needs no lifetime unless
+  it is given a flag, and a platform with its own primitive implements one method.
+  `NoCancel`, the default, never cancels.
+- **One value can be both clock and delay:** implement `Clock` and `Delay` for a reference
+  to it (`&Time`, keeping the time in a `Cell`) and pass the reference twice.
+
+### Below: hdmi-hal and the SCDC implementation
+
+From [hdmi-hal](https://github.com/ashlar-display/hdmi-hal) the procedures use:
+
+| Trait | What for |
+|---|---|
+| `TmdsPhy` | `stop_output` (bring-up step 1, tear-down), `configure` (rate, ratio, video) and `set_scrambling` (step 3, tear-down, the quick restore), `start_output` (step 5); `capabilities`, through `SourceTmdsFacts::from`, for `choose` |
+| `Clock` | `now()`: the write time, the deadline, the check's window, the events |
+| `Delay` | the ratio wait and the check's interval, "at least" the duration given |
+
+Start and stop are separate calls, so the output stays off while the sink is written, and
+`configure` sets rate, ratio and video without starting output. Powering the PHY on and off
+is hdmi-hal's `PhyPower`, which the caller calls, not the procedures: on unplug, after a
+tear-down with `SinkPresence::Gone`.
+
+The SCDC side is `TmdsScdc` ("The SCDC trait"), implemented by the caller or by culvert's
+adapter.
+
+### Above: the caller
+
+The caller owns hotplug, the EDID and negotiation, and retries. How a caller maps its events
+onto the procedures:
+
+| When | Calls |
+|---|---|
+| A TMDS mode is to be shown | `choose` (sink facts from the EDID, source facts from `TmdsPhy::capabilities`, the policy), then `bring_up` |
+| Before a mode change | `tear_down` with the sink present |
+| Before FRL training, from a TMDS link | `tear_down` with `clear_sink` ("Tear-down") |
+| On unplug | `tear_down` with `SinkPresence::Gone`, then power the PHY off |
+| A hotplug while the link is up | read the EDID again; for the same sink, `check_reconnect` with its current facts; on `Lost`, `tear_down` and `bring_up`, or `quick_restore` |
+| The check ended `NotSet` | `quick_restore` again later |
+
+A DRM driver maps them onto its hooks the same way: atomic enable to `bring_up`, disable to
+`tear_down`, its hotplug handler to `check_reconnect`; `tear_down_on_error` keeps a failed
+enable, which the hook cannot report, from leaving a half-started output.
+
 ---
 
 ## `no_std`, `alloc`, and `async`
 
-`#![no_std]` without `alloc` in every build, and `#![forbid(unsafe_code)]`. `choose` is
-synchronous and pure, a `const fn`, so there is nothing async in it. CI builds the crate
-for a bare target (`thumbv7em-none-eabi`) with and without default features, and checks the
+`#![no_std]` without `alloc` in every build, and `#![forbid(unsafe_code)]`. `choose` is a
+pure `const fn`. The procedures are `async fn`s over `TmdsIo`, and `TmdsLink` polls them to
+completion with a no-op waker, without a runtime; their outcomes use fixed storage and their
+events a callback, so nothing needs `alloc`. CI builds the crate for a bare target
+(`thumbv7em-none-eabi`) with and without default features and with `culvert`, and checks the
 MSRV (Rust 1.85).
+
+An async driver over hdmi-hal-async's traits, with futures that can be `Send`, is planned
+as a companion crate; it drives the same core. Whatever drives it, a procedure is stopped
+through its cancel flag, not by dropping its future (with `select`, a timeout or an
+aborted task): a dropped call leaves the PHY and the sink in an unknown state, and the
+caller loses the tear-down that `Cancelled` carries.
 
 ---
 
 ## Testing
 
-The input space is small, so the tests cover it whole:
+**Choosing the link.** The input space is small, so the tests cover it whole:
 
-- **Every combination:** both thresholds × the three sink facts × the source fact × the
-  policy flag, at rates either side of and at 340 000 kHz, from 0 to `u32::MAX`; each case
-  checked against the rules, including the `ScramblingDecision` and `ParamsError`.
+- **Every combination:** both thresholds × the sink facts × the source facts × the policy,
+  at rates either side of and at 340 000 kHz, from 0 to `u32::MAX`; each case checked
+  against the rules, including the `ScramblingDecision` and `ParamsError`.
 - **The boundary:** 340 000 kHz gives 1/10 with `Above340`; with `AtOrAbove340` it gives
-  1/40 on a sink that can take scrambling and the plain 1/10 link, with the reason, on one
-  that cannot; 340 001 kHz gives 1/40 with both, or `ScramblingUnsupported`.
+  1/40 when both ends can scramble and the plain 1/10 link, with the reason, when one
+  cannot; 340 001 kHz gives 1/40, or `ScramblingUnsupported`.
 - **The gate on `LTE_340Mcsc_scramble`:** a sink that declares it without scrambling
   support gets no low-rate scrambling.
 - **Every reason:** each `ScramblingOff` flag and each `ScramblingUnsupported` flag is set
   exactly when its own fact blocks scrambling, whatever the others are.
 - **Invariants:** `sink_config()` is `None` exactly when no write is due (no SCDC, or a
   plain link the gate leaves unwritten), and otherwise matches `clock_ratio()` and
-  `scrambling()`; `scrambling()` is true exactly for
-  `Required` and `LowRate`; `rate_khz()` returns the input.
+  `scrambling()`; `scrambling()` is true exactly for `Required` and `LowRate`;
+  `rate_khz()` returns the input.
 - **`const` use:** tests evaluate `choose` and the constructors in `const` items, so a
   change that breaks `const fn` fails the build.
-- **`From` impls:** every combination of the three HF-SCDB fields against a literal table
-  of expected facts, and `None` maps to `SinkTmdsFacts::NONE`.
-- **The README's example** runs as a doctest.
+- **`From` impls:** every combination of the HF-SCDB fields against a literal table of
+  expected facts, and `None` maps to `SinkTmdsFacts::NONE`; the PHY's capabilities map to
+  the source facts.
+
+**The procedures** run against a double of `TmdsIo` that records every call, answers from a
+few registers, fails what a test tells it to, and advances its clock on every read and
+delay:
+
+- **Each step and its order,** for both bring-up orders, plain and scrambled links, both
+  write forms, and every setting's options.
+- **Every failure:** each SCDC step failing with a transient and a non-transient error, each
+  PHY call failing, and what each leaves (the warning, the error, the output's state, the
+  cleanup).
+- **The check:** a sink that reports at once, late or never; failed reads; a gone bus; a
+  clock that does not advance, ended by the read count; a zero window.
+- **Cancellation:** a sweep that sets the flag after every operation of a full bring-up and
+  checks where it is seen and that the tear-down follows.
+- **The event bounds:** every combination of link, sink, order, write form and failure,
+  checked against `MAX_BRING_UP_EVENTS`, and each other procedure against its own.
+- **The sync driver** over simple parts, and the culvert adapter over a register-level
+  `ScdcTransport`.
+- **The README's examples** run as doctests.
 
 CI measures line coverage and fails if it drops more than 0.1% below the recorded
 baseline.
