@@ -13,6 +13,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   link parameters pass straight to the PHY. The variants (`Div10`, `Div40`) and derives are
   the same; what changes is that spiritlevel now depends on hdmi-hal, and with it always on
   display-types.
+- **Equality of the sink facts and of the link includes the new fields.** `SinkTmdsFacts`
+  compares and hashes `frl_capable` too, so facts converted from an EDID that declares no
+  FRL differ from `SinkTmdsFacts::new`'s for a sink with SCDC; `TmdsLinkParams` compares
+  and hashes the sink facts it was chosen from. `NONE == new(false, false, false)` holds as
+  in 0.1.
 
 ### Added
 
@@ -87,9 +92,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and `FailedRead`, `OutputState` and `WriteStage`. `TmdsStep` gains the bring-up steps, so
   an error and its event name a step alike.
 - **`SinkTmdsFacts::frl_capable`**: the sink declares FRL, from a non-zero `Max_FRL_Rate`
-  in the `From` impls, with `with_frl_capable`. `new` sets it `true`, so a caller that never
-  learns of it still gets the FRL clear before a bring-up; `NONE` and a block without FRL
-  set it `false`. With it, the events of the work before a bring-up: the FRL clear
+  in the `From` impls, with `with_frl_capable`. `new` sets it for a sink with SCDC, so a
+  caller that never learns of it still gets the FRL clear before a bring-up; `NONE` and a
+  block without FRL leave it clear. With it, the events of the work before a bring-up: the FRL clear
   (`FrlRateCleared`, `FltUpdateCleared`, `FrlClearSkipped` with its `FrlClearSkip`) and
   `Source_Version` (`SinkVersionRead`, `SourceVersionWritten`, `SourceVersionSkipped` with its
   `SourceVersionSkip`).

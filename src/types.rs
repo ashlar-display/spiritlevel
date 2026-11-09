@@ -47,9 +47,10 @@ pub struct SinkTmdsFacts {
 
 impl SinkTmdsFacts {
     /// A sink without HDMI Forum capabilities: no SCDC and no scrambling.
-    pub const NONE: Self = Self::new(false, false, false).with_frl_capable(false);
+    pub const NONE: Self = Self::new(false, false, false);
 
-    /// Facts stated by the caller.
+    /// Facts stated by the caller, with [`frl_capable`](Self::frl_capable) taken to be
+    /// `scdc_present`.
     #[must_use]
     pub const fn new(
         scdc_present: bool,
@@ -60,14 +61,14 @@ impl SinkTmdsFacts {
             scdc_present,
             scrambling_supported,
             lte_340mcsc_scramble,
-            frl_capable: true,
+            frl_capable: scdc_present,
         }
     }
 
-    /// Sets whether the sink declares FRL. [`new`](Self::new) takes it to, so a caller that
-    /// never learns of this fact still gets the FRL clear before a bring-up: on a sink
-    /// without FRL, a write to a register it does not use, where `false` would skip the
-    /// clear silently.
+    /// Sets whether the sink declares FRL. [`new`](Self::new) takes a sink with SCDC to, so
+    /// a caller that never learns of this fact still gets the FRL clear before a bring-up:
+    /// on a sink without FRL, a write to a register it does not use, where `false` would
+    /// skip the clear silently. FRL needs SCDC, and the clear runs only on an SCDC sink.
     #[must_use]
     pub const fn with_frl_capable(mut self, frl_capable: bool) -> Self {
         self.frl_capable = frl_capable;
@@ -302,13 +303,11 @@ mod tests {
 
     #[test]
     fn sink_facts_none_is_all_clear() {
-        assert_eq!(
-            SinkTmdsFacts::NONE,
-            SinkTmdsFacts::new(false, false, false).with_frl_capable(false)
-        );
+        assert_eq!(SinkTmdsFacts::NONE, SinkTmdsFacts::new(false, false, false));
         const { assert!(!SinkTmdsFacts::NONE.frl_capable) };
-        // `new` takes the sink to declare FRL, so the FRL clear is not skipped silently.
+        // `new` takes an SCDC sink to declare FRL, so the FRL clear is not skipped silently.
         assert!(SinkTmdsFacts::new(true, true, true).frl_capable);
+        assert!(!SinkTmdsFacts::new(false, true, true).frl_capable);
     }
 
     #[test]

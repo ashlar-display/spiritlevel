@@ -215,8 +215,8 @@ gets neither.
    majority, so a setting, `ClearFrl`: **`IfSinkDeclaresFrl`** (default; `Config_1` holds FRL
    settings only on such a sink, `SinkTmdsFacts::frl_capable`) or `EveryScdcSink` (amdgpu's,
    for a driver whose EDID may not describe the sink behind it). `SinkTmdsFacts::new` sets
-   `frl_capable`, so a caller that never states it still gets the clear, which on a sink
-   without FRL writes a register that sink does not use.
+   `frl_capable` for a sink with SCDC, so a caller that never states it still gets the
+   clear, which on a sink without FRL writes a register that sink does not use.
 2. **`Source_Version` = 1.** A setting, `SourceVersionWrite`: **`EveryBringUp`** (default),
    `IfSinkVersion1` (amdgpu: after reading `Sink_Version`), `WhenScrambling` (the helper
    lineage, dw-hdmi: only on a scrambled link) or `Never` (for a sink that misbehaves).
@@ -459,7 +459,7 @@ pub enum ScramblingThreshold {
     AtOrAbove340,   // ≥ 340 000 kHz
 }
 
-/// What the sink declares (`new`, which sets `frl_capable`; `NONE` for a sink without HDMI
+/// What the sink declares (`new`, which sets `frl_capable` to `scdc_present`; `NONE` for a sink without HDMI
 /// Forum capabilities, e.g. a DVI or HDMI 1.x sink; `with_frl_capable`). With the
 /// `display-types` feature, `From<&HdmiForumSinkCap>` and `From<Option<&HdmiForumSinkCap>>`.
 #[non_exhaustive]
