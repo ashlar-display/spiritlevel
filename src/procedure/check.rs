@@ -289,8 +289,23 @@ mod tests {
             Duration::from_millis(3),
             &mut |_| {},
         ));
-        // 0 ms, then 8 ms (3 + 5); the next delay ends at 16 ms, past the window.
+        // 0 ms, then 8 ms (3 + 5); another interval would reach 11 ms, past the window.
         assert_eq!(check.reads, 2);
+
+        // A delay that itself runs past the window ends the check without its read.
+        let mut io = TestIo::new();
+        io.delay_extra = Duration::from_millis(8);
+        let from = io.now();
+        let check = block_on(scrambling_check(
+            &mut io,
+            from,
+            Duration::from_millis(10),
+            Duration::from_millis(3),
+            &mut |_| {},
+        ));
+        // 0 ms, then a delay that ends at 11 ms.
+        assert_eq!(check.reads, 1);
+        assert!(io.ops().iter().any(|op| matches!(op, Op::Delay(_))));
     }
 
     #[test]
