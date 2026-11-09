@@ -9,12 +9,17 @@
 //! # Features
 //!
 //! - **`display-types`** (default) — `From` conversions from display-types'
-//!   `HdmiForumSinkCap` into the sink facts. Without it the crate has no dependencies.
+//!   `HdmiForumSinkCap` into the sink facts. Without it the caller fills the sink facts
+//!   itself.
+//! - **`culvert`** — [`TmdsScdc`] for culvert's SCDC client, with its errors as
+//!   `CulvertError`.
 
 #![no_std]
 #![forbid(unsafe_code)]
 #![deny(missing_docs)]
 
+#[cfg(feature = "culvert")]
+mod culvert;
 mod error;
 mod params;
 mod scdc;
@@ -28,6 +33,9 @@ struct ReadmeDoctests;
 pub use error::{ParamsError, UpdateError};
 pub use params::{ScramblingDecision, ScramblingOff, TmdsLinkParams};
 pub use scdc::TmdsScdc;
+
+#[cfg(feature = "culvert")]
+pub use crate::culvert::CulvertError;
 pub use types::{
     ClockRatio, ScramblingStatus, ScramblingThreshold, SinkTmdsConfig, SinkTmdsFacts,
     SourceTmdsFacts, TmdsPolicy,
