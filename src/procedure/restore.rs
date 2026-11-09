@@ -47,7 +47,13 @@ pub async fn quick_restore<Io: TmdsIo, F: FnMut(TmdsEvent)>(
     record: &mut F,
 ) -> Result<Restored<Io::ScdcError>, RestoreError<Io::ScdcError, Io::PhyError>> {
     let mut emit = |io: &Io, kind| record(TmdsEvent::new(io.now(), kind));
-    emit(io, TmdsEventKind::QuickRestoreStarted { link: *link });
+    emit(
+        io,
+        TmdsEventKind::QuickRestoreStarted {
+            link: *link,
+            config: *config,
+        },
+    );
     let end = |failed_at| TmdsEventKind::QuickRestoreEnded { failed_at };
 
     let mut sink_written_at = None;

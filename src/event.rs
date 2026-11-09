@@ -235,6 +235,9 @@ pub enum TmdsEventKind {
     QuickRestoreStarted {
         /// The running link whose sink configuration it restores.
         link: TmdsLinkParams,
+        /// The settings in force; the quick restore reads the `TMDS_Config` write's two and
+        /// the check's timing.
+        config: BringUpConfig,
     },
     /// A quick restore ended.
     #[non_exhaustive]
