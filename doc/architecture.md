@@ -195,6 +195,251 @@ register holds, not its bit layout: the encoding belongs to the SCDC implementat
 
 ---
 
+## The procedures
+
+Each procedure takes the running link's `TmdsLinkParams`, makes one attempt (and, for
+bring-up and the quick restore, one check) and returns what happened; whether and when to
+try again is the caller's. The procedures are written once as an I/O-free core
+(`spiritlevel::procedure`, over the `TmdsIo` trait) and driven synchronously by `TmdsLink`,
+over a `TmdsScdc`, a `TmdsPhy`, a `Clock`, a `Delay` and an optional `Cancel` flag. Every step
+is also recorded as a `TmdsEvent` ("Diagnostics").
+
+### Before both paths: the FRL clear and `Source_Version`
+
+On a sink with SCDC, bring-up first does two things, in this order; a sink without SCDC
+gets neither.
+
+1. **The FRL clear.** A source that may have used FRL clears the sink's FRL settings
+   before TMDS: `Config_1` (the FRL rate), then `FLT_update` [37]. amdgpu does it on every
+   TMDS bring-up, Amlogic only on a sink that declares FRL [22][23]. Two sources, no
+   majority, so a setting, `ClearFrl`: **`IfSinkDeclaresFrl`** (default; `Config_1` holds FRL
+   settings only on such a sink, `SinkTmdsFacts::frl_capable`) or `EveryScdcSink` (amdgpu's,
+   for a driver whose EDID may not describe the sink behind it). `SinkTmdsFacts::new` sets
+   `frl_capable`, so a caller that never states it still gets the clear, which on a sink
+   without FRL writes a register that sink does not use.
+2. **`Source_Version` = 1.** A setting, `SourceVersionWrite`: **`EveryBringUp`** (default),
+   `IfSinkVersion1` (amdgpu: after reading `Sink_Version`), `WhenScrambling` (the helper
+   lineage, dw-hdmi: only on a scrambled link) or `Never` (for a sink that misbehaves).
+
+Both come before the `TMDS_Config` write, as in every source that does them [22]; the order
+between them is amdgpu's, the one source that does both. A failed write here is a warning and
+the bring-up carries on: neither source can see the result of its FRL clear [27], and no
+source treats `Source_Version` as fatal.
+
+### Bring-up
+
+`bring_up(link, video, config)` brings up the link `choose` decided, carrying `video` (the
+TMDS character rate's colour depth and format, which the PHY needs). The steps for a
+scrambled link above 340 Mcsc, with `BringUpConfig::DEFAULT`:
+
+1. **Output off.** TMDS output is stopped before anything is written, and stays stopped
+   until step 5. i915, amdgpu, the dw-hdmi family, MediaTek v2, Xilinx and Amlogic write the
+   sink with their output off [12]–[17]; vc4 and Tegra write it with unscrambled output
+   running and turn their scrambler on afterwards [18]. A majority with dissent, so a
+   setting, `OutputDuringSinkWrite`: **`Stopped`** (default) or `Running` (below).
+2. **The sink's `TMDS_Config`, both bits in one write**, from `sink_config()`. amdgpu,
+   nouveau and Amlogic write both bits in one transaction [14][6][17]; the others write them
+   one at a time, in either order, and none depends on an order. One write leaves no moment
+   in which the sink holds one bit without the other. How it is written is a setting,
+   `TmdsConfigWrite`: **`ReadModifyWrite`** (default; the bits set, every other bit kept as
+   read), as seven lineages do (the five that write through Linux's SCDC helper, nouveau and
+   Xilinx) [38]; or `WholeByte`, as amdgpu and Amlogic do [14][17] (one transaction, no
+   read).
+3. **The PHY:** the character rate, the clock ratio and the source's scrambler, with the
+   output still off, as Xilinx and MediaTek v2 set their scrambler before output starts
+   [16][15].
+4. **The wait after the ratio write**, `ratio_wait`, **default 1 ms**: the five lineages
+   that write the ratio through Linux's SCDC helper sleep 1–2 ms after every ratio write
+   (i915, the helper lineage, the dw-hdmi family, Tegra, MediaTek v2) [38], the dw-hdmi
+   family 100 ms more in its own code [12]; amdgpu, nouveau, Xilinx and Amlogic start output
+   at once [14][6][16][17]. It is measured from the write, so the PHY's own time counts
+   towards it, and spent in slices of at most `check_interval` (for cancellation).
+5. **Output on.** If more than `scrambling_deadline` (**default 100 ms**) has passed since
+   the write, the outcome carries a `DeadlineMissed` warning saying by how much. The deadline
+   comes from one source's comment (i915: the sink may disable scrambling if it sees no
+   scrambled clock within 100 ms of the write [19]), so it warns rather than stops: the check
+   shows whether the sink followed.
+6. **The check** of `Scrambling_Status` ("The scrambling check").
+
+**No scrambled TMDS ever reaches the sink before its write**, in every source and in both
+orders. With `Running`, the PHY is configured with its scrambler off and the output started
+first (steps 3 and 5), then `TMDS_Config` is written and the wait spent, and only then the
+source's scrambler turned on; the deadline runs from the write to the scrambler, and the
+check from the scrambler.
+
+**At or below 340 Mcsc** the same steps run, with these differences:
+
+- **`TMDS_Config` is written at every bring-up** where a write is due (rule 6), with the
+  ratio cleared and `Scrambling_Enable` set only for a scrambled low-rate link, as i915,
+  amdgpu, the dw-hdmi family, nouveau, MediaTek v2, Xilinx and Amlogic do [20], so a sink
+  left at 1/40 by something else (another source, a firmware that ran first) is corrected.
+  The wait follows every `TMDS_Config` write, one that clears the ratio included [38].
+- **A plain link has no deadline and no check**: `Scrambling_Status` stays 0 there, so
+  there is nothing to wait for (`CheckResult::NotApplicable`). A scrambled low-rate link
+  has both, as i915 polls a low-rate scrambled link as it does a high-rate one [21].
+- **A failed write on a plain link is followed by one `TMDS_Config` read**, whose result
+  (the two bits and the byte, or the read's error) is part of the write's warning: with no
+  check, a sink that kept 1/40 after a failed clear would otherwise go unnoticed.
+
+**A failed `TMDS_Config` write** is a setting, `OnTmdsConfigFailure`: **`CarryOn`**
+(default) keeps a warning and continues to the PHY and output, and the check shows whether
+the sink followed. Most sources carry on (i915 logs it and enables the port, the others do
+not look at the result) [26]; the DRM helper clears both sink bits and leaves its scrambler
+off, and nouveau returns when its read fails [39]. `Stop` ends the bring-up with an error.
+With read-modify-write, the warning says which half failed: a failed read means nothing was
+written. Carrying on is also what a DRM driver needs, since its enable hooks cannot fail.
+
+### The scrambling check
+
+`Scrambling_Status` is read every `check_interval` (**default 1 ms**) until the sink reports
+scrambling or `check_window` (**default 200 ms**) ends, counted from output start (from the
+scrambler with `Running`): i915's values [19]. The helper lineage and Tegra re-check only
+after 1 s and 5 s [1][7]; that is the caller's repeat, not this check.
+
+- **Failed reads do not end it.** Polling goes on until the status is set or the window
+  ends, so the result tells a sink that missed one read and then reported scrambling from
+  one that never answered. It stops early only on an error that will not pass: the bus is
+  gone (`DdcErrorKind::Detached`) or the read cannot be done (`Unsupported`). Any other kind,
+  including one added to `DdcErrorKind` later, counts as transient: polling on costs a window
+  at most, stopping early would misreport a link that came up.
+- **Bounded by count as well as by time:** at most `ceil(window / interval) + 1` reads, so a
+  clock that does not advance (a timer not started) ends the check instead of hanging the
+  bring-up; reaching the count is recorded (`read_cap_reached`). The window is checked with
+  the clock before each read, so slow failing reads overrun it by at most one read; the
+  interval is spent by the `Delay`, not measured by the clock.
+- **At least one read**, whatever the window: a window of 0 reads once, and an interval of
+  0 reads again at once. `BringUpConfig::validate()` reports the settings that defeat their
+  purpose: a deadline shorter than the wait (every bring-up would miss it) and an interval
+  longer than the window (one read); the procedures run with any values.
+
+The check ends `Set` (with the time it took), `NotSet` (the window ended) or `Unreadable`
+(every read failed, or one failed with a non-transient error), with the number of reads and
+failed reads and the first error. The link is left running in every case: no source treats
+an unset `Scrambling_Status` as fatal, so the result is part of the outcome, not a condition
+of it, and repeating the bring-up later is the caller's.
+
+### What a bring-up returns
+
+- **`BringUpOutcome::Up(LinkUp)`** when steps 1–5 completed: the link, when the sink was
+  written and the output started, the check, and the **warnings**, each kind at most once:
+  a failed FRL clear (`Config_1` or `FLT_update`), `Sink_Version` read or `Source_Version`
+  write, a failed `TMDS_Config` write under `CarryOn`, and a missed deadline.
+- **`BringUpError`** when a step failed in a way that stops the bring-up: a PHY call (output
+  off, configure, scrambler, output on), an SCDC call with a non-transient error, or a
+  `TMDS_Config` write under `Stop`. It names the step, the error, whether the output may be
+  running, and the warnings gathered.
+- **After an error, a tear-down**, with the caller's `TearDownConfig`, and its result in the
+  error (`Cleanup`); with the sink taken to be gone after `Detached`. `tear_down_on_error:
+  false` leaves both ends as the error left them, for a tool that wants to read the state.
+- **`BringUpOutcome::Cancelled`** when the caller's cancel flag stopped it ("Cancellation").
+
+### Cancellation
+
+A caller stops a running procedure through its `Cancel` flag (`&AtomicBool` implements it),
+never by dropping the future: a dropped call leaves the PHY and the sink in an unknown state.
+Bring-up reads the flag at entry, before each SCDC step, before each slice of the ratio wait
+and before each read of the check, so a cancel is seen within one `check_interval` whatever
+the configured wait. Once it is set, the bring-up ends `BringUpOutcome::Cancelled`, never an
+error, with where it was seen (`CancelPoint`):
+
+- at entry, before any I/O, with nothing torn down (`Cleanup::Skipped`);
+- anywhere else, after a tear-down with the caller's `TearDownConfig`, whatever
+  `tear_down_on_error` says.
+
+Tear-down is the recovery and is not cancelled; the reconnect check is one read; the quick
+restore reads the flag in its check alone. No procedure clears the flag: the caller resets it
+before its next call, or that call ends `Cancelled` at entry.
+
+### Tear-down
+
+`tear_down(link, config, presence)` stops the link the bring-up started; `presence` says
+whether the sink is still there, which only the caller knows. Powering the PHY down is not
+part of it.
+
+**Whether the sink is cleared** is a setting, `TearDownConfig::clear_sink`, **default off**:
+the dw-hdmi family, nouveau, MediaTek v2, Xilinx and Amlogic leave `TMDS_Config` at tear-down
+and rely on the next bring-up writing it [28]; i915, amdgpu, the helper lineage and Tegra
+clear both bits [29]. Off is safe when the next link is a TMDS bring-up by this crate, which
+writes `TMDS_Config` every time. **Before FRL it is not**: FRL training leaves `TMDS_Config`
+alone, so a 1/40 scrambled link followed by FRL would leave both bits set for the whole FRL
+session; amdgpu, the one source with separate TMDS and FRL paths, clears on every disable
+[29]. A caller taking the link from TMDS to FRL, or handing the sink to something that may not
+write it, sets `clear_sink`. Amlogic clears on suspend for sinks on a quirk list [31], which
+this setting also covers.
+
+With clearing on, the steps are:
+
+1. **The sink's `TMDS_Config` to 0, in one write.** When is a setting, `SinkClearTiming`:
+   **`BeforeOutputStops`** (default), as i915, amdgpu, the helper lineage and Tegra do [29],
+   or `AfterOutputStops`, Amlogic's quirk path [31]. Only what the bring-up set is cleared: a
+   plain link needs no write, as the helper lineage and Tegra write nothing when they did not
+   scramble [29].
+2. **The source's scrambler off.** Its order against the sink is a setting, `ScramblerOff`,
+   with no majority: **`AfterSink`** (chosen default; the DRM helper and Tegra) or
+   `BeforeSink` (vc4) [29].
+3. **Output off.**
+
+With clearing off, only the output stops; the next bring-up sets the scrambler again.
+
+- **When the sink is gone** (`SinkPresence::Gone`), nothing is written to it. The sources
+  split two against two (the helper and amdgpu write only to a connected sink, vc4 and Tegra
+  regardless) [30]; skipping cannot hurt a sink that is not there.
+- **Failures never keep the output running.** A failed sink write is a warning, as in every
+  source that clears [29]. A failed PHY call is an error, but every later step is still
+  attempted, so a failed scrambler call does not leave the output on; the result records
+  each step's first error (`TearDownError`).
+- **No waits:** the sources' waits during tear-down belong to AVMUTE and video, not to the
+  sink's bits.
+
+### The reconnect check
+
+A sink may lose its `TMDS_Config` while the source keeps the link up: the helper lineage
+says the sink's SCDC status "is reset and must be explicitly restored" on a reconnect with the
+display active [32]. So after a hotplug while the link is up, the helper lineage checks on
+every hotplug with the connector connected, dw-hdmi brings the link up again when the sink is
+back, and Xilinx rewrites on a short HPD pulse [32][33][34]. Hotplug is the caller's;
+`check_reconnect(link, current_sink)` is the check it calls, also usable at start-up on a link
+found running (Amlogic writes `TMDS_Config` again then [35]).
+
+- **The same sink first.** `current_sink` is the sink's facts from the EDID read after the
+  hotplug. When they differ from the facts the link was chosen with, the link no longer fits
+  the sink: `SinkChanged`, with nothing read. Equal facts do not prove the same sink; telling
+  sinks apart by their EDID is the caller's, before it calls the check.
+- **One read, both bits compared** with `sink_config()`: i915 compares both, the helper and
+  vc4 only `Scrambling_Enable`, since they always set the two together [32]. Every link is
+  checked, a plain one too (its expected value is both bits 0, which a reset sink matches),
+  unlike the helper lineage, which checks only a link that set something.
+- **It writes nothing.** The result is `Matches`, `Lost` (with the bits and byte read),
+  `Unreadable` (the read's error), `NotApplicable` (no write is due on this link) or
+  `SinkChanged`. A failed read is reported, not acted on, as i915 and vc4 log it and the
+  helper returns it [32].
+
+**After `Lost`**, the way back is the caller's. The helper lineage does a full mode set and
+dw-hdmi its whole setup; Xilinx rewrites with the stream running [32][33][34]. A majority does
+the full bring-up, which in this crate is `tear_down` followed by `bring_up`; the quick restore
+is the option.
+
+### The quick restore
+
+`quick_restore(link, config)` is Xilinx's way back [34], with the check added:
+
+1. **`TMDS_Config` in one write**, with the output left running and no wait, since the ratio
+   does not change. `tmds_config_write` and `on_tmds_config_failure` apply as in bring-up; a
+   write under `CarryOn` that fails is kept in `Restored::write_failed`.
+2. **The source's scrambler set again** to the link's, as Xilinx does with the sink write
+   [34] (Amlogic writes only the sink [35]): one PHY call that covers a source that lost its
+   state with the sink. A plain link gets it too, set off.
+3. **The check**, as in bring-up, from the scrambler, on a scrambled link.
+
+It does not touch the PHY's rate or clock ratio, stops nothing and tears nothing down on an
+error (`RestoreError`): the link was running, and what to do next is the caller's. If the
+source side may have changed too, the full bring-up is the way back. It reads the cancel flag
+only in its check: the write and the scrambler are one call each, and a restore stopped
+between them would leave the sink and the source disagreeing. A cancelled check ends
+`CheckResult::Cancelled`, with the link left running.
+
+---
+
 ## Key Types
 
 ```rust
@@ -405,6 +650,30 @@ Driver source read at these commits; line numbers refer to them.
 | [9]  | Xilinx                              | `XilinxProcessorIPLib/drivers/v_hdmitx1/src/xv_hdmitx1.c:630–635`, `742–744`; `v_hdmitxss1/src/xv_hdmitxss1.c:2938–2957`                                                                 |
 | [10] | Amlogic                             | `drivers/media/vout/hdmitx21/hw/hdmi_tx_hw.c:668–676`, `2780–2799`, `2889–2906`                                                                                                          |
 | [11] | Linux EDID parser                   | `drivers/gpu/drm/drm_edid.c:6340–6356` (`scrambling.supported`: SCDC present and a non-zero `Max_TMDS_Character_Rate`; `scrambling.low_rates` only within that)                          |
+| [12] | dw-hdmi family (dw-hdmi, Meson and Rockchip glue) | `drivers/gpu/drm/bridge/synopsys/dw-hdmi.c:1646–1675` (PHY off, ratio write, 100 ms above 340 Mcsc, PHY on); `meson/meson_dw_hdmi.c:399–403`; `rockchip/dw_hdmi-rockchip.c:352–354` |
+| [13] | i915, enable path                   | `drivers/gpu/drm/i915/display/intel_ddi.c:3440–3445` (sink write), `3528` (port buffers enabled)                                                                                          |
+| [14] | amdgpu, TMDS enable                 | `drivers/gpu/drm/amd/display/dc/link/link_dpms.c:1908–1912` (sink write), `1931–1940` (output enabled), `1942–1943`; `link/protocols/link_ddc.c:602–613` (one byte, `3` above 340 MHz)    |
+| [15] | MediaTek v2, enable path            | `drivers/gpu/drm/mediatek/mtk_hdmi_v2.c:87–101`, `746` (scrambler, then sink), `1039` → `1045` (`phy_power_on` after)                                                                    |
+| [16] | Xilinx, stream start                | `v_hdmitxss1/src/xv_hdmitxss1.c:2213–2217`; `v_hdmitx1/src/xv_hdmitx1.c:633–638`; pass-through example `v_hdmitxss1/examples/xhdmi_example/PassThrough/xhdmi_exdes_sm_tx.c:601`, `2118–2121` (TMDS clock off), `2531–2545` (stream start, then clock on) |
+| [17] | Amlogic, mode set                   | `drivers/media/vout/hdmitx_common/hdmitx_mode_set.c:457–460` (PHY off); `hdmitx21/hw/hdmi_tx_hw.c:1475` → `3628–3631` → `2889–2904` (one byte, then source), `1578` (PHY on)               |
+| [18] | vc4, Tegra (output running)         | `drivers/gpu/drm/vc4/vc4_hdmi.c:1690–1692`, `815–820`; `drivers/gpu/drm/tegra/sor.c:2606`, `2631`, `2658`, `2177–2180`                                                                  |
+| [19] | i915, scrambling check              | `drivers/gpu/drm/i915/display/intel_hdmi.c:2749–2754` (1 ms polls for 200 ms, logged only), `2767–2770` (comment: 100 ms)                                                                |
 | [20] | Plain link: `TMDS_Config` written at every bring-up | i915 `intel_hdmi.c:2794–2795`; amdgpu `link_ddc.c:602–613`; dw-hdmi `dw-hdmi.c:1428–1430`, `2131–2134`, `2303–2306`; nouveau `disp.c:800–812`; MediaTek v2 `mtk_hdmi_v2.c:87–101`, `746`; Xilinx `xv_hdmitxss1.c:2213–2217`, `xv_hdmitx1.c:663–668`, `737–744`; Amlogic `hdmi_tx_hw.c:2889–2904` |
+| [21] | Low-rate scrambling check           | i915 `intel_hdmi.c:2433–2435`, `2745–2754`; amdgpu `link_ddc.c:629–643`                                                                                                                 |
+| [22] | amdgpu, before `TMDS_Config`        | `drivers/gpu/drm/amd/display/dc/link/protocols/link_ddc.c:585–588` (SCDC gate), `589–590` (FRL cleared), `592–600` (`Source_Version` when `Sink_Version` is 1), `602` (`TMDS_Config`)    |
+| [23] | Amlogic, clearing FRL               | `drivers/media/vout/hdmitx21/hdmi_tx_main.c:466–488` (only with FRL and SCDC declared)                                                                                                    |
 | [24] | Helper lineage, Tegra: tear-down only | `drivers/gpu/drm/vc4/vc4_hdmi.c:807–810`, `857–858`, `922`; `drivers/gpu/drm/tegra/sor.c:2149–2155`, `2202`, `2218`                                                                     |
 | [25] | Which sinks get the write           | any SCDC sink: amdgpu `link_ddc.c:585–588`, MediaTek v2 `mtk_hdmi_v2.c:96–99`, Xilinx `xv_hdmitx1.c:789–806`; scrambling support: i915 `intel_hdmi.c:2785–2786`, dw-hdmi `dw-hdmi.c:1380–1404`, nouveau `disp.c:796`; every sink: Amlogic `hdmi_tx_hw.c:2893–2901` |
+| [26] | A failed `TMDS_Config` write        | logged, then continued: i915 `intel_ddi.c:3440–3445`, dw-hdmi-qp `dw-hdmi-qp.c:558–560`, nouveau `disp.c:812–815`; result unused: amdgpu `link_ddc.c:611`, Xilinx `xv_hdmitxss1.c:2214–2217`, vc4 `vc4_hdmi.c:815–816`, Tegra `sor.c:2177–2178`, MediaTek v2 `mtk_hdmi_v2.c:98–99`, dw-hdmi `dw-hdmi.c:1428–1430`; no result: Amlogic `hdmi_tx_hw.c:2780–2798` |
+| [27] | A failed FRL clear                  | amdgpu `drivers/gpu/drm/amd/display/dc/link/protocols/link_hdmi_frl.h:30`, `32` (`void`), called at `link_ddc.c:589–590`; Amlogic `drivers/media/vout/hdmitx21/hdmi_tx_main.c:484–487` (results unused) |
+| [28] | Tear-down without clearing          | dw-hdmi `dw-hdmi.c:2408–2416`, `2979–2990`; nouveau `disp.c:800–812` (enable only); MediaTek v2 `mtk_hdmi_v2.c:1071–1104`; Xilinx `xhdmi_exdes_sm_tx.c:2020–2035`, `2620–2636`; Amlogic `hdmitx_common/hdmitx_mode_set.c:785–792`, `hdmitx21/hdmi_tx_main.c:4199–4222` |
+| [29] | Tear-down clearing the sink, and its order | i915 `intel_ddi.c:3614–3626` (in `disable`, logged), `3230` (buffers off in `post_disable`), `5345–5347`; amdgpu `link_dpms.c:2442`, `2460–2465`, `2487–2491`; helper `drm_hdmi_helper.c:602–630`; vc4 `vc4_hdmi.c:831–860`, `908–922`; dw-hdmi-qp `dw-hdmi-qp.c:599–601`; Tegra `sor.c:2149–2162`, `2218–2220` |
+| [30] | Tear-down with the sink gone        | helper `drm_hdmi_helper.c:622–624` (connected only); amdgpu `link_ddc.c:582–583` (only with a sink); vc4 `vc4_hdmi.c:831–860`, Tegra `sor.c:2149–2162` (regardless)                       |
+| [31] | Amlogic, clearing on suspend (quirk) | `hdmitx21/hdmi_tx_main.c:331`, `353–361`; `hdmitx_common/hdmitx_compliance.c:21–25`, `63–76`                                                                                       |
+| [32] | Helper lineage, reconnect check     | i915 `intel_ddi.c:4824`, `4847–4869` (conditions, read, both bits), `4858–4862` (failed read logged), `4871–4880` (full mode set), `4908–4915` (on hotplug); helper `drm_hdmi_helper.c:632–731` (`drm_connector_hdmi_sync_scdc`; comment 640–641, check 677–709, reset 712–726); vc4 `vc4_hdmi.c:320–354`, `376–392` |
+| [33] | dw-hdmi, reconnect                  | `drivers/gpu/drm/bridge/synopsys/dw-hdmi.c:3084–3109` (HPD and RX sense), `2397–2438` (PHY off, then the whole setup)                                                                  |
+| [34] | Xilinx, HPD toggle                  | pass-through example `xhdmi_exdes_sm_tx.c:1394–1403` (`StreamStart` on a toggle); `xv_hdmitxss1.c:2213–2217`; toggle timing `xv_hdmitx1.c:205–224`                                     |
+| [35] | Amlogic, restores without reading   | `drivers/media/vout/hdmitx21/hdmi_tx_main.c:5053–5062` (start-up with HPD high), `4744–4796` (stalled clock); `hw/hdmi_tx_hw.c:2972–2985` (the sink write only)                                                                             |
+| [37] | The FRL clear's registers          | amdgpu `drivers/gpu/drm/amd/display/dc/link/protocols/link_hdmi_frl.c:178–200` (`FLT_update`), `394–415` (`Config_1`); Amlogic `drivers/media/vout/hdmitx21/hdmi_tx_main.c:484–487` |
+| [38] | Linux's SCDC helper                 | `drivers/gpu/drm/display/drm_scdc_helper.c:221–245`, `277–307` (read-modify-write; nothing written after a failed read), `300–305` (1–2 ms after every ratio write); its callers `intel_hdmi.c:2794–2795`, `vc4_hdmi.c:815–816`, `drm_hdmi_helper.c:477–481`, `dw-hdmi.c:1428–1430`, `sor.c:2177–2178`, `mtk_hdmi_v2.c:98–99`; nouveau `disp.c:800–812` and Xilinx `xv_hdmitx1.c:643–680`, 715–757 (read-modify-write in their own code) |
+| [39] | A failed `TMDS_Config` write, dissent | DRM helper `drivers/gpu/drm/display/drm_hdmi_helper.c:576–586` (no source scrambler, both sink bits cleared); nouveau `drivers/gpu/drm/nouveau/dispnv50/disp.c:800–804` (returns on a failed read) |
