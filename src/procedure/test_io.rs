@@ -1,6 +1,8 @@
 //! A [`TmdsIo`] double for the procedures' tests: it records every operation, answers from
-//! a few registers, fails what it is told to, and advances its clock by one microsecond on
-//! every read and by the full duration on every delay.
+//! a few registers (a successful write of `TMDS_Config` updates the register, as a sink's
+//! would), fails what it is told to, and keeps a clock that advances by one microsecond on
+//! every `now()`, by `op_micros` on every SCDC and PHY call, and by the full duration
+//! (plus `delay_extra`) on every delay.
 
 use core::cell::Cell;
 use core::future::Future;
@@ -77,6 +79,8 @@ pub struct TestIo {
     pub frozen_clock: bool,
     /// Every delay takes this much longer than asked, as a late timer would.
     pub delay_extra: Duration,
+    /// What every SCDC and PHY call costs on the clock, in microseconds.
+    pub op_micros: u64,
 }
 
 impl TestIo {
@@ -104,6 +108,7 @@ impl TestIo {
             status_reads: 0,
             frozen_clock: false,
             delay_extra: Duration::ZERO,
+            op_micros: 0,
         }
     }
 
@@ -115,6 +120,9 @@ impl TestIo {
     fn push(&mut self, op: Op) {
         self.log[self.len] = op;
         self.len += 1;
+        if !self.frozen_clock && !matches!(op, Op::Delay(_)) {
+            self.clock.set(self.clock.get() + self.op_micros);
+        }
     }
 
     fn scdc(&mut self, op: Op) -> Result<(), DdcErrorKind> {
@@ -137,12 +145,19 @@ impl TestIo {
     }
 }
 
+/// The two bits of `TMDS_Config` as the double lays them out: scrambling bit 0, ratio bit 1.
+fn bits(config: SinkTmdsConfig) -> u8 {
+    u8::from(config.scrambling_enable) | (u8::from(config.high_tmds_clock_ratio) << 1)
+}
+
 impl TmdsIo for TestIo {
     type ScdcError = DdcErrorKind;
     type PhyError = ();
 
     async fn write_tmds_config(&mut self, config: SinkTmdsConfig) -> Result<(), DdcErrorKind> {
-        self.scdc(Op::WriteTmdsConfig(config))
+        self.scdc(Op::WriteTmdsConfig(config))?;
+        self.tmds_config = bits(config);
+        Ok(())
     }
 
     async fn update_tmds_config(
@@ -156,7 +171,9 @@ impl TmdsIo for TestIo {
             } else {
                 UpdateError::Read(e)
             }
-        })
+        })?;
+        self.tmds_config = (self.tmds_config & !0x03) | bits(config);
+        Ok(())
     }
 
     async fn read_tmds_config(&mut self) -> Result<TmdsConfigReading, DdcErrorKind> {
@@ -241,6 +258,35 @@ mod tests {
     use super::*;
     use crate::ClockRatio;
     use hdmi_hal::phy::TmdsVideo;
+
+    #[test]
+    fn writes_reach_the_register_and_calls_cost_time() {
+        let mut io = TestIo::new();
+        io.tmds_config = 0xF0;
+        io.op_micros = 100;
+        let before = io.now();
+        block_on(async {
+            io.update_tmds_config(SinkTmdsConfig::new(true, true))
+                .await
+                .unwrap();
+        });
+        assert_eq!(io.tmds_config, 0xF3, "reserved bits kept");
+        block_on(async {
+            io.write_tmds_config(SinkTmdsConfig::new(false, true))
+                .await
+                .unwrap();
+        });
+        assert_eq!(io.tmds_config, 0x02, "whole byte");
+        // Two calls at 100 µs each, and one µs for the second now().
+        assert_eq!(
+            io.now().saturating_duration_since(before),
+            Duration::from_micros(201)
+        );
+        // A failed write leaves the register.
+        io.fail_scdc = Some(DdcErrorKind::Busy);
+        let _ = block_on(io.write_tmds_config(SinkTmdsConfig::new(true, true)));
+        assert_eq!(io.tmds_config, 0x02);
+    }
 
     #[test]
     fn the_double_records_and_answers() {
