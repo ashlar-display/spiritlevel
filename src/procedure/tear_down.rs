@@ -202,6 +202,17 @@ mod tests {
         .unwrap()
     }
 
+    /// 1080p60 scrambled at a low rate: `Scrambling_Enable` alone, ratio 1/10.
+    fn low_rate() -> TmdsLinkParams {
+        TmdsLinkParams::choose(
+            148_500,
+            SinkTmdsFacts::new(true, true, true),
+            SourceTmdsFacts::new(true),
+            TmdsPolicy::DEFAULT,
+        )
+        .unwrap()
+    }
+
     const CLEARING: TearDownConfig = TearDownConfig::DEFAULT.with_clear_sink(true);
 
     fn run(
@@ -429,6 +440,26 @@ mod tests {
     }
 
     #[test]
+    fn a_low_rate_scrambled_link_is_cleared_too() {
+        let link = low_rate();
+        assert_eq!(link.sink_config(), Some(SinkTmdsConfig::new(true, false)));
+        let mut io = TestIo::new();
+        io.tmds_config = 0x01;
+        let (result, _) = run(&mut io, &link, &CLEARING, SinkPresence::Present);
+        assert_eq!(
+            result,
+            Ok(TornDown {
+                sink: SinkClear::Cleared
+            })
+        );
+        assert!(
+            io.ops()
+                .contains(&Op::WriteTmdsConfig(SinkTmdsConfig::new(false, false)))
+        );
+        assert_eq!(io.tmds_config, 0);
+    }
+
+    #[test]
     fn no_combination_records_more_than_the_bound() {
         for clear_sink in [false, true] {
             for timing in [
@@ -437,7 +468,7 @@ mod tests {
             ] {
                 for off in [ScramblerOff::AfterSink, ScramblerOff::BeforeSink] {
                     for presence in [SinkPresence::Present, SinkPresence::Gone] {
-                        for link in [scrambled(), plain()] {
+                        for link in [scrambled(), low_rate(), plain()] {
                             for fail in [false, true] {
                                 let config = TearDownConfig::DEFAULT
                                     .with_clear_sink(clear_sink)
