@@ -1346,16 +1346,27 @@ mod tests {
             .iter_warnings()
             .next()
             .copied();
-        assert!(
-            matches!(w, Some(BringUpWarning::DeadlineMissed { by }) if by >= Duration::from_micros(500))
-        );
-        assert!(
-            r.events[..r.count]
-                .iter()
-                .any(|k| matches!(k, Some(TmdsEventKind::DeadlineMissed { .. })))
-        );
+        // By exactly how much the output started late after the write.
+        let took = r.events[..r.count]
+            .iter()
+            .find_map(|k| match k {
+                Some(TmdsEventKind::OutputStarted {
+                    after_write: Some(d),
+                }) => Some(*d),
+                _ => None,
+            })
+            .unwrap();
+        let by = took - Duration::from_micros(500);
+        assert_eq!(w, Some(BringUpWarning::DeadlineMissed { by }));
+        assert!(r.has(TmdsEventKind::DeadlineMissed { by }));
+        // A deadline of exactly that time is met: the run is the same, step for step.
+        let mut io = TestIo::new();
+        io.scrambling_status = 0x01;
+        let met = config.with_scrambling_deadline(took);
+        let r = up(&mut io, &link(594_000, NO_FRL), &met);
+        assert!(r.link_up().unwrap().warnings.is_empty());
 
-        // With Running, the deadline runs from the write to the scrambler.
+        // With Running, the deadline runs from the write to the scrambler, the wait included.
         let mut io = TestIo::new();
         io.scrambling_status = 0x01;
         let r = up(
@@ -1363,7 +1374,13 @@ mod tests {
             &link(594_000, NO_FRL),
             &config.with_output_during_sink_write(OutputDuringSinkWrite::Running),
         );
-        assert_eq!(r.link_up().unwrap().warnings.len(), 1);
+        let warnings = r.link_up().unwrap().warnings;
+        assert_eq!(warnings.len(), 1);
+        assert!(matches!(
+            warnings.iter_warnings().next(),
+            Some(BringUpWarning::DeadlineMissed { by })
+                if *by > Duration::from_micros(500) && *by < Duration::from_micros(600)
+        ));
     }
 
     #[test]
