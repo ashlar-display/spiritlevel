@@ -8,7 +8,7 @@ Relevant docs for contributors:
 
 - [`doc/setup.md`](doc/setup.md) — build, test, MSRV and coverage commands
 - [`doc/architecture.md`](doc/architecture.md) — role, scope, the rules for choosing the
-  link and their sources, the types, the testing strategy, design principles and decisions
+  link and their sources, the types, the testing strategy and design principles
 - [`doc/roadmap.md`](doc/roadmap.md) — what is planned and under consideration
 
 ## Issues and pull requests

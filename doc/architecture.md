@@ -1,7 +1,7 @@
 # Architecture
 
 This document describes `spiritlevel` as released: what it decides and does, the rules it
-follows and where they come from, its types, and the decisions behind them. Claims about HDMI behaviour cite
+follows and where they come from, its types, and why it works the way it does. Claims about HDMI behaviour cite
 at least two independent public implementations of HDMI sources (see "Sources").
 
 ## Role
@@ -148,19 +148,22 @@ Dependencies point only down the stack: nothing below `spiritlevel` depends on i
    Without SCDC the sink cannot be configured at all: no `TMDS_Config` value, ratio 1/10,
    no scrambling.
    - **Above 340 000 kHz**, `choose` refuses with `ParamsError::ScramblingUnsupported`,
-     naming every missing fact (decision 2).
+     naming every missing fact. The sources gate the sink write and carry on unscrambled;
+     `spiritlevel` refuses instead, because negotiation never picks such a rate, so
+     reaching `choose` with it means the inputs disagree, and an unscrambled link would
+     hide that.
    - **At exactly 340 000 kHz with `AtOrAbove340`**, such a sink gets the plain 1/10 link,
      which is a valid link at that rate under the default threshold, and `ScramblingOff`
-     names the missing fact (decision 3). Tegra enables its scrambler and the sink's ratio
-     only with SCDC [7]; MediaTek v2 sets its own scrambler regardless and skips only the
-     sink write [8].
+     names the missing fact, so the departure from the requested threshold is visible.
+     Tegra enables its scrambler and the sink's ratio only with SCDC [7]; MediaTek v2 sets
+     its own scrambler regardless and skips only the sink write [8].
 
-   - **A source without a scrambler** (`scrambling` not set) is treated the same way:
+   - **A source without a scrambler** (`scrambling` not set) is treated the same way,
+     since its sink would otherwise be told to expect scrambling the source cannot send:
      refused above 340 000 kHz, with `ScramblingUnsupported::source_cannot_scramble` set
      together with any sink flags that also apply; the plain 1/10 link at exactly
      340 000 kHz with `AtOrAbove340` (`ScramblingOff::source_cannot`); and no low-rate
-     scrambling (rule 3). `SourceTmdsFacts::new` takes the source to have one, so a caller
-     that never states the fact gets the results it got before the fact existed.
+     scrambling (rule 3). `SourceTmdsFacts::new` takes the source to have one.
 
    A source scrambling with an unconfigured sink is never an outcome of `choose`. One
    source, Amlogic, writes `TMDS_Config` even to a sink that declares no SCDC [10]; every
@@ -173,8 +176,11 @@ Dependencies point only down the stack: nothing below `spiritlevel` depends on i
    one included [20], while the helper lineage and Tegra clear it only at their own
    tear-down [24], so a sink left at 1/40 by something else would stay there. The groups
    differ only for a sink with SCDC that declares no TMDS rate above 340 Mcsc. Under
-   `ScramblingSink`, such a sink's plain link has no `sink_config()`; Amlogic's "every
-   sink" is not offered (rule 5).
+   `ScramblingSink`, such a sink's plain link has no `sink_config()`. The gate is a policy
+   setting, not an edit of the sink facts: the facts say what the sink declares, the
+   policy what the source does about it, so `Source_Version` and the FRL clear still
+   happen on a sink the gate leaves unwritten. Amlogic's "every sink" is not offered
+   (rule 5): a caller whose sink has SCDC despite its EDID sets `scdc_present`.
 
 ### Output
 
@@ -355,9 +361,11 @@ baseline.
 - **Procedure, not policy.** Where HDMI sources differ, the behaviour is a setting with the
   majority as default (rules 3 and 4); the defaults are documented and changeable.
 - **Every reason, not the first.** A decision or an error carries every condition that
-  applies, so a diagnostic tool's user sees all of them at once (decision 4).
+  applies, each judged on its own fact, so a diagnostic tool's user sees all of them at
+  once instead of fixing one and meeting the next. They fit in a `Copy` value without
+  `alloc`.
 - **Cited behaviour.** Each rule cites the public implementations it follows; where
-  `spiritlevel` departs from them, the decision says so and why.
+  `spiritlevel` departs from them, the rule says so and why.
 - **The output stays consistent.** The PHY's settings and the sink's register come from one
   value that only the rules can build.
 - **Stable output types.** Output structs and enums are `#[non_exhaustive]`, so fields and
@@ -366,50 +374,6 @@ baseline.
 - **Interfaces, not implementations.** The procedures run over traits: hdmi-hal's for the
   PHY, clock and delay, and the crate's own `TmdsScdc`; culvert's adapter and
   display-types' conversions are optional conveniences.
-
----
-
-## Decisions
-
-1. **0.1 is the I/O-free decision alone** (2026-11-06). The procedures need PHY, power,
-   clock and delay traits that do not exist in hdmi-hal yet; the decision does not, and is
-   useful on its own. Rejected: waiting to release the crate with the procedures.
-2. **A rate above 340 000 kHz on a sink that cannot take scrambling is refused**
-   (2026-11-07). The sources gate the sink write and carry on unscrambled; `spiritlevel`
-   returns `ParamsError::ScramblingUnsupported` instead. Negotiation should never pick
-   such a rate, so reaching `choose` with it means the inputs disagree, and an unscrambled
-   link would hide that. Rejected: following the sources.
-3. **At exactly 340 000 kHz with `AtOrAbove340`, a sink that cannot take scrambling gets
-   the plain 1/10 link** (2026-11-08). It is a valid link at that rate under the default
-   threshold, so refusing would be stricter than needed; `ScramblingOff` names the missing
-   fact, so the departure from the requested threshold is visible. Rejected: refusing like
-   decision 2; applying low-rate scrambling there, which needs scrambling support the sink
-   lacks.
-4. **Every reason, not the first** (2026-11-07). `ScramblingOff` and
-   `ScramblingUnsupported` set a flag for each condition that applies, each judged on its
-   own fact. They fit in a `Copy` value without `alloc`, so there is no capacity reason to
-   stop at one. Rejected: a single reason, which would make a user fix one condition and
-   then meet the next.
-5. **Low-rate scrambling needs scrambling support** (2026-11-08). `LTE_340Mcsc_scramble`
-   counts only with SCDC and a non-zero `Max_TMDS_Character_Rate`, as in every source that
-   scrambles at low rates (rule 3), with its own reason flag, `no_scrambling_support`.
-   Rejected: taking the declaration alone; gating it inside the `From` impl, which would
-   report "does not declare" for a sink that does.
-
-6. **A rate above the source's own maximum is refused** (2026-11-08). The PHY's
-   capabilities report states it; refusing in `choose`, first, keeps a bring-up from
-   writing 1/40 to a sink the PHY cannot then drive. `SourceTmdsFacts::new` sets no
-   maximum, so 0.1's results do not change. Rejected: leaving the source's ceiling to
-   negotiation alone, which knows it only if the caller passes it on.
-7. **A source without a scrambler is treated as a sink that cannot take scrambling**
-   (2026-11-08): refused above 340 000 kHz, the plain link at exactly 340 000 kHz with
-   `AtOrAbove340`, with its own reason flag. Rejected: assuming every source scrambles,
-   which would write 1/40 and scrambling to a sink the source then sends plain TMDS.
-8. **Which SCDC sinks get the plain link's write is a policy setting** (2026-11-08, rule 6),
-   not an edit of the sink facts: the facts say what the sink declares, the policy what the
-   source does about it, so `Source_Version` and the FRL clear are not switched off with
-   the write. Rejected: Amlogic's "every sink", which writes to a sink that declares no
-   SCDC.
 
 ---
 

@@ -24,7 +24,7 @@ display-types = { version = "0.5", default-features = false, optional = true }
 hdmi-hal = { version = "0.6", default-features = false }
 culvert = { version = "0.3", default-features = false, optional = true }
 
-# Prototype against hdmi-hal's unreleased breaking release (release order step 2): pushed
+# Prototype against hdmi-hal's unreleased breaking release: pushed
 # commits of hdmi-hal's feat/tmds-phy branch and of culvert's feat/tmds-config, which
 # builds on it (the `culvert` feature), moved by hand. Removed when they are released.
 [patch.crates-io]

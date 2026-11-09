@@ -145,6 +145,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   bring-up and tear-down over the four parts (compiled as a doctest), lists the `culvert`
   feature, and no longer says the crate has no dependencies without `display-types`; the
   roadmap keeps what is still to come.
+- **`doc/architecture.md` describes the link choice as it now is** (the source's scrambler
+  and maximum rate, the `TMDS_Config` gate, hdmi-hal's clock ratio, the dependencies); 
+  each reason a user needs is with the rule it explains.
 - **The README shows the "trusted publishing only" badge**: crates.io refuses token
   uploads for this crate, and "Verifying releases" says so.
 
