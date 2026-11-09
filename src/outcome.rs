@@ -84,10 +84,17 @@ pub enum BringUpWarning<S> {
         /// By how much.
         by: Duration,
     },
+    /// The scrambling check did not see the sink report scrambled TMDS: the link is up, but
+    /// the sink may show nothing. [`LinkUp::check`] has the details.
+    #[non_exhaustive]
+    ScramblingNotConfirmed {
+        /// [`CheckResult::NotSet`] or [`CheckResult::Unreadable`].
+        result: CheckResult,
+    },
 }
 
 /// How many warnings a bring-up can gather: one of each kind.
-const WARNING_KINDS: usize = 6;
+const WARNING_KINDS: usize = 7;
 
 /// The warnings a bring-up gathered, in the order they arose. Fixed storage, so no
 /// `alloc`, and never full: each kind occurs at most once.
@@ -101,7 +108,7 @@ impl<S> Warnings<S> {
     /// No warnings.
     pub(crate) const fn new() -> Self {
         Self {
-            list: [None, None, None, None, None, None],
+            list: [None, None, None, None, None, None, None],
             len: 0,
         }
     }
@@ -419,9 +426,9 @@ mod tests {
         ));
         assert_eq!(it.next(), None);
         drop(it);
-        // A seventh push has nowhere to go and is dropped rather than panicking; a
+        // An eighth push has nowhere to go and is dropped rather than panicking; a
         // bring-up never makes one.
-        for _ in 0..5 {
+        for _ in 0..6 {
             w.push(BringUpWarning::FrlRateClearFailed(DdcErrorKind::Other));
         }
         assert_eq!(w.len(), WARNING_KINDS);

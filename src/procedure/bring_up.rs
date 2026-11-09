@@ -415,7 +415,7 @@ async fn main_path<Io: TmdsIo, F: FnMut(TmdsEvent)>(
         .await?;
         let started = start(io, written_at, record).await?;
         deadline(io, written_at, started, scrambled, config, warnings, record);
-        let check = check_from(io, started, scrambled, config, record).await?;
+        let check = check_from(io, started, scrambled, config, warnings, record).await?;
         return Ok(Up {
             sink_written_at: written_at,
             output_started_at: started,
@@ -452,7 +452,7 @@ async fn main_path<Io: TmdsIo, F: FnMut(TmdsEvent)>(
             warnings,
             record,
         );
-        check = check_from(io, scrambling_at, scrambled, config, record).await?;
+        check = check_from(io, scrambling_at, scrambled, config, warnings, record).await?;
     }
     Ok(Up {
         sink_written_at: written_at,
@@ -524,12 +524,14 @@ async fn start<Io: TmdsIo, F: FnMut(TmdsEvent)>(
 }
 
 /// The scrambling check from `from`, on a scrambled link; a plain link's check does not
-/// apply. A cancelled check is the bring-up's cancellation.
+/// apply. A check that did not see scrambling is also a warning; a cancelled check is the
+/// bring-up's cancellation.
 async fn check_from<Io: TmdsIo, F: FnMut(TmdsEvent)>(
     io: &mut Io,
     from: Timestamp,
     scrambled: bool,
     config: &BringUpConfig,
+    warnings: &mut Warnings<Io::ScdcError>,
     record: &mut F,
 ) -> Result<ScramblingCheck<Io::ScdcError>, CancelPoint> {
     if !scrambled {
@@ -537,11 +539,14 @@ async fn check_from<Io: TmdsIo, F: FnMut(TmdsEvent)>(
     }
     let check =
         scrambling_check(io, from, config.check_window, config.check_interval, record).await;
-    if check.result == CheckResult::Cancelled {
-        Err(CancelPoint::Check)
-    } else {
-        Ok(check)
+    match check.result {
+        CheckResult::Cancelled => return Err(CancelPoint::Check),
+        result @ (CheckResult::NotSet | CheckResult::Unreadable) => {
+            warnings.push(BringUpWarning::ScramblingNotConfirmed { result });
+        }
+        _ => {}
     }
+    Ok(check)
 }
 
 /// A warning when scrambled output reached the sink later after its write than the
@@ -1138,6 +1143,7 @@ mod tests {
     fn unscrambled_output_runs_through_the_write_with_running() {
         let link = link(594_000, NO_FRL);
         let mut io = TestIo::new();
+        io.scrambling_status = 0x01;
         let config = MAIN_ONLY.with_output_during_sink_write(OutputDuringSinkWrite::Running);
         let r = up(&mut io, &link, &config);
         let ops = io.ops();
@@ -1268,8 +1274,46 @@ mod tests {
     }
 
     #[test]
+    fn a_check_that_sees_no_scrambling_is_a_warning() {
+        let link = link(594_000, NO_FRL);
+        // Set: no warning.
+        let mut io = TestIo::new();
+        io.scrambling_status = 0x01;
+        assert!(
+            up(&mut io, &link, &MAIN_ONLY)
+                .link_up()
+                .unwrap()
+                .warnings
+                .is_empty()
+        );
+        // Not set within the window, and unreadable.
+        for (fail, result) in [
+            (None, CheckResult::NotSet),
+            (Some(DdcErrorKind::Busy), CheckResult::Unreadable),
+        ] {
+            let mut io = TestIo::new();
+            io.fail_scdc = fail;
+            io.scdc_ok_calls = 1; // the sink's write succeeds
+            let r = up(&mut io, &link, &MAIN_ONLY);
+            let up = r.link_up().unwrap();
+            assert_eq!(up.check.result, result);
+            assert!(
+                up.warnings
+                    .iter()
+                    .any(|w| *w == BringUpWarning::ScramblingNotConfirmed { result }),
+                "{result:?}"
+            );
+        }
+        // A plain link has no check and no warning.
+        let mut io = TestIo::new();
+        let r = up(&mut io, &super::tests::link(148_500, NO_FRL), &MAIN_ONLY);
+        assert!(r.link_up().unwrap().warnings.is_empty());
+    }
+
+    #[test]
     fn a_late_start_is_a_warning() {
         let mut io = TestIo::new();
+        io.scrambling_status = 0x01;
         let config = MAIN_ONLY.with_scrambling_deadline(Duration::from_micros(500));
         let r = up(&mut io, &link(594_000, NO_FRL), &config);
         let w = r.link_up().unwrap().warnings.iter().next().copied();
@@ -1284,6 +1328,7 @@ mod tests {
 
         // With Running, the deadline runs from the write to the scrambler.
         let mut io = TestIo::new();
+        io.scrambling_status = 0x01;
         let r = up(
             &mut io,
             &link(594_000, NO_FRL),

@@ -319,14 +319,17 @@ The check ends `Set` (with the time it took), `NotSet` (the window ended) or `Un
 (every read failed, or one failed with a non-transient error), with the number of reads and
 failed reads and the first error. The link is left running in every case: no source treats
 an unset `Scrambling_Status` as fatal, so the result is part of the outcome, not a condition
-of it, and repeating the bring-up later is the caller's.
+of it, and repeating the bring-up later is the caller's. `NotSet` and `Unreadable` are also a
+warning, `ScramblingNotConfirmed`, since a link the sink does not follow shows nothing: a
+caller that only looks at the warnings still sees it.
 
 ### What a bring-up returns
 
 - **`BringUpOutcome::Up(LinkUp)`** when steps 1–5 completed: the link, when the sink was
   written and the output started, the check, and the **warnings**, each kind at most once:
   a failed FRL clear (`Config_1` or `FLT_update`), `Sink_Version` read or `Source_Version`
-  write, a failed `TMDS_Config` write under `CarryOn`, and a missed deadline.
+  write, a failed `TMDS_Config` write under `CarryOn`, a missed deadline, and a check that did
+  not see scrambling.
 - **`BringUpError`** when a step failed in a way that stops the bring-up: a PHY call (output
   off, configure, scrambler, output on), or the sink's `TMDS_Config` write with a
   non-transient error or under `Stop`. It names the step, the error, whether the output may be
@@ -650,6 +653,7 @@ pub enum BringUpWarning<S> {
         read_back: Option<Result<TmdsConfigReading, S>>,     // a plain link's read-back
     },
     DeadlineMissed { by: Duration },
+    ScramblingNotConfirmed { result: CheckResult },          // NotSet or Unreadable
 }
 
 /// Fixed storage for the warnings, in the order they came: `iter`, `len`, `is_empty`.

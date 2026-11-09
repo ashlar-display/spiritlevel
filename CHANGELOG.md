@@ -87,7 +87,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Bring-up's result types**, ahead of the procedure: `BringUpOutcome` (`Up` with a
   `LinkUp`, or `Cancelled` with where the flag was seen, the `Cleanup` and the warnings
   gathered), `BringUpError` (`Scdc` or `Phy`,
-  with the step, the output's state, the `Cleanup` and the warnings gathered), the six
+  with the step, the output's state, the `Cleanup` and the warnings gathered), the seven
   `BringUpWarning` kinds in fixed `Warnings` storage, `ScramblingCheck` with `CheckResult`
   and `FailedRead`, and `OutputState`. `TmdsStep` gains the bring-up steps, so an error and
   its event name a step alike; the read of a read-modify-write is `ReadTmdsConfig`, its
