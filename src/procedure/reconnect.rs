@@ -13,10 +13,12 @@ use super::TmdsIo;
 /// Checks whether the sink still holds the `TMDS_Config` `link` needs, after a hotplug
 /// while the link is up, or at start-up on a link found running.
 ///
-/// `current_sink` is the sink's facts now, from the EDID read after the hotplug. When they
-/// differ from those the link was chosen with ([`TmdsLinkParams::sink`]), the link no
-/// longer fits the sink: [`ReconnectCheck::SinkChanged`], with nothing read. Equal facts do
-/// not prove the same sink; telling sinks apart by their EDID is the caller's.
+/// `current_sink` is the sink's facts now, from the EDID read after the hotplug, with any
+/// quirk the caller applied to the first reading applied again. When the link no longer
+/// fits them ([`TmdsLinkParams::fits`]: choosing again would refuse the rate or give another
+/// ratio, scrambling or `TMDS_Config`), the result is [`ReconnectCheck::SinkChanged`], with
+/// nothing read; a fact the link does not depend on, such as FRL, may change. Facts that fit
+/// do not prove the same sink; telling sinks apart by their EDID is the caller's.
 ///
 /// Otherwise one read, compared with [`TmdsLinkParams::sink_config`] on both bits, a plain
 /// link included (its expected value is both bits 0). A link with no write due (a sink
@@ -40,7 +42,7 @@ pub async fn check_reconnect<Io: TmdsIo, F: FnMut(TmdsEvent)>(
         },
     );
 
-    let result = if current_sink != link.sink() {
+    let result = if !link.fits(current_sink) {
         ReconnectCheck::SinkChanged
     } else if let Some(expected) = link.sink_config() {
         match io.read_tmds_config().await {
@@ -177,6 +179,31 @@ mod tests {
         let (result, count, _) = check(&mut io, &link(594_000, SINK), other);
         assert_eq!(result, ReconnectCheck::SinkChanged);
         assert_eq!(count, 2);
+
+        // A fact the link does not depend on changes nothing: FRL toggled in the EDID, or
+        // LTE_340Mcsc_scramble on a 1/40 link.
+        io.tmds_config = 0x03;
+        let frl_off = SINK.with_frl_capable(false);
+        assert_eq!(
+            check(&mut io, &link(594_000, SINK), frl_off).0,
+            ReconnectCheck::Matches
+        );
+        let lte = SinkTmdsFacts::new(true, true, true);
+        assert_eq!(
+            check(&mut io, &link(594_000, SINK), lte).0,
+            ReconnectCheck::Matches
+        );
+        // On a low-rate link it is what the link depends on.
+        let low = TmdsLinkParams::choose(
+            297_000,
+            lte,
+            SourceTmdsFacts::new(true),
+            TmdsPolicy::DEFAULT,
+        )
+        .unwrap();
+        assert!(low.scrambling());
+        assert_eq!(check(&mut io, &low, SINK).0, ReconnectCheck::SinkChanged);
+        io = TestIo::new();
 
         let no_scdc = link(148_500, SinkTmdsFacts::NONE);
         let (result, count, _) = check(&mut io, &no_scdc, SinkTmdsFacts::NONE);

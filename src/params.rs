@@ -59,6 +59,8 @@ pub struct TmdsLinkParams {
     decision: ScramblingDecision,
     sink_config: Option<SinkTmdsConfig>,
     sink: SinkTmdsFacts,
+    source: SourceTmdsFacts,
+    policy: TmdsPolicy,
 }
 
 impl TmdsLinkParams {
@@ -131,6 +133,8 @@ impl TmdsLinkParams {
                 decision: ScramblingDecision::Required,
                 sink_config: Some(SinkTmdsConfig::new(true, true)),
                 sink,
+                source,
+                policy,
             });
         }
         if rate_khz > THRESHOLD_KHZ {
@@ -182,6 +186,8 @@ impl TmdsLinkParams {
             decision,
             sink_config,
             sink,
+            source,
+            policy,
         })
     }
 
@@ -220,17 +226,57 @@ impl TmdsLinkParams {
         self.sink_config
     }
 
-    /// The sink facts the link was chosen from: what the link assumes about the sink, which
-    /// a reconnect check compares with the sink's current facts.
+    /// The sink facts the link was chosen from: what the link assumes about the sink.
     #[must_use]
     pub const fn sink(&self) -> SinkTmdsFacts {
         self.sink
+    }
+
+    /// Whether the link still fits a sink with the facts `sink`: [`choose`](Self::choose),
+    /// with the source facts and the policy this link was chosen with, gives the same clock
+    /// ratio, scrambling and `TMDS_Config` value. A fact the link does not depend on (such
+    /// as [`SinkTmdsFacts::frl_capable`], or `LTE_340Mcsc_scramble` on a 1/40 link) may
+    /// differ.
+    #[must_use]
+    pub fn fits(&self, sink: SinkTmdsFacts) -> bool {
+        match Self::choose(self.rate_khz, sink, self.source, self.policy) {
+            Ok(other) => {
+                other.clock_ratio == self.clock_ratio
+                    && other.scrambling() == self.scrambling()
+                    && other.sink_config == self.sink_config
+            }
+            Err(_) => false,
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_link_fits_facts_that_choose_the_same_link() {
+        let sink = SinkTmdsFacts::new(true, true, false);
+        let source = SourceTmdsFacts::new(false);
+        let link = TmdsLinkParams::choose(594_000, sink, source, TmdsPolicy::DEFAULT).unwrap();
+        assert!(link.fits(sink));
+        assert!(link.fits(sink.with_frl_capable(false)));
+        assert!(link.fits(SinkTmdsFacts::new(true, true, true)));
+        // No scrambling support: refused at this rate.
+        assert!(!link.fits(SinkTmdsFacts::new(true, false, false)));
+        // A plain link on a sink that lost SCDC: no write any more.
+        let plain = TmdsLinkParams::choose(148_500, sink, source, TmdsPolicy::DEFAULT).unwrap();
+        assert!(!plain.fits(SinkTmdsFacts::NONE));
+        // The link compares its source facts and policy too.
+        let other = TmdsLinkParams::choose(
+            148_500,
+            sink,
+            source,
+            TmdsPolicy::DEFAULT.with_low_rate_scrambling(false),
+        )
+        .unwrap();
+        assert_ne!(plain, other);
+    }
 
     const RATES: [u32; 9] = [
         0,

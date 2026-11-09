@@ -16,7 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Equality of the sink facts and of the link includes the new fields.** `SinkTmdsFacts`
   compares and hashes `frl_capable` too, so facts converted from an EDID that declares no
   FRL differ from `SinkTmdsFacts::new`'s for a sink with SCDC; `TmdsLinkParams` compares
-  and hashes the sink facts it was chosen from. `NONE == new(false, false, false)` holds as
+  and hashes the sink facts, source facts and policy it was chosen from. `NONE == new(false, false, false)` holds as
   in 0.1.
 
 ### Added
@@ -80,9 +80,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (with its `_with_events` form): after a hotplug while the link is up, one read of the
   sink's `TMDS_Config`, compared with what the link needs on both bits, a plain link
   included. `ReconnectCheck` is `Matches`, `Lost` (with the bits and byte read),
-  `Unreadable`, `NotApplicable` (no SCDC) or `SinkChanged`: the caller's current sink facts
-  differ from those the link was chosen with, and nothing is read. It writes nothing.
-  `TmdsLinkParams::sink()` gives the sink facts a link was chosen from, and
+  `Unreadable`, `NotApplicable` (no SCDC) or `SinkChanged`: the link no longer fits the
+  caller's current sink facts, and nothing is read. It writes nothing.
+  `TmdsLinkParams::sink()` gives the sink facts a link was chosen from, `fits` whether
+  choosing again for other sink facts gives the same ratio, scrambling and `TMDS_Config`
+  (a fact the link does not depend on, such as FRL, may differ), and
   `MAX_RECONNECT_CHECK_EVENTS` the check's bound.
 - **Bring-up's result types**, ahead of the procedure: `BringUpOutcome` (`Up` with a
   `LinkUp`, or `Cancelled` with where the flag was seen, the `Cleanup` and the warnings

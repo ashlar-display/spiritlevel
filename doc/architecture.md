@@ -187,8 +187,9 @@ Dependencies point only down the stack: nothing below `spiritlevel` depends on i
 `TmdsLinkParams`: the rate, the clock ratio, whether the link is scrambled and why
 (`ScramblingDecision`), the sink's `TMDS_Config` contents (`SinkTmdsConfig`, `None` exactly
 when no write is due: a sink without SCDC, or a plain link rule 6 leaves unwritten), and the
-sink facts it was chosen from (`sink()`, which bring-up's FRL clear and the reconnect check
-use). The procedures program the PHY with the ratio and the scrambling flag and write the
+sink facts it was chosen from (`sink()`, which bring-up's FRL clear uses). It also keeps the
+source facts and policy, so `fits(sink)` can tell whether choosing again for other sink
+facts gives the same link, as the reconnect check asks. The procedures program the PHY with the ratio and the scrambling flag and write the
 sink's value through `TmdsScdc`; a caller without them does the same itself. `spiritlevel` states *what* the
 register holds, not its bit layout: the encoding belongs to the SCDC implementation
 ([culvert](https://github.com/ashlar-display/culvert)'s `TmdsConfig`, for one).
@@ -408,9 +409,13 @@ back, and Xilinx rewrites on a short HPD pulse [32][33][34]. Hotplug is the call
 found running (Amlogic writes `TMDS_Config` again then [35]).
 
 - **The same sink first.** `current_sink` is the sink's facts from the EDID read after the
-  hotplug. When they differ from the facts the link was chosen with, the link no longer fits
-  the sink: `SinkChanged`, with nothing read. Equal facts do not prove the same sink; telling
-  sinks apart by their EDID is the caller's, before it calls the check.
+  hotplug, with any quirk the caller applied before applied again. When the link no longer
+  fits them (`TmdsLinkParams::fits`: choosing again, with the source facts and policy the
+  link was chosen with, would refuse the rate or give another ratio, scrambling or
+  `TMDS_Config`), the result is `SinkChanged`, with nothing read. A fact the link does not
+  depend on may change: a TV that toggles FRL in its EDID keeps its TMDS link. Facts that
+  fit do not prove the same sink; telling sinks apart by their EDID is the caller's, before
+  it calls the check.
 - **One read, both bits compared** with `sink_config()`: i915 compares both, the helper and
   vc4 only `Scrambling_Enable`, since they always set the two together [32]. Every link is
   checked, a plain one too (its expected value is both bits 0, which a reset sink matches),
@@ -529,7 +534,8 @@ pub struct ScramblingOff {
 /// The chosen link, built only by `choose`: `rate_khz()`, `clock_ratio()`,
 /// `scrambling()` (true for `Required` and `LowRate`), `scrambling_decision()`,
 /// `sink_config() -> Option<SinkTmdsConfig>` (`None` exactly when no write is due),
-/// `sink() -> SinkTmdsFacts`.
+/// `sink() -> SinkTmdsFacts`, `fits(SinkTmdsFacts) -> bool`. Equality compares the source
+/// facts and policy it was chosen with too.
 pub struct TmdsLinkParams { /* private */ }
 
 impl TmdsLinkParams {
