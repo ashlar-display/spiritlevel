@@ -18,10 +18,17 @@ use super::check::scrambling_check;
 /// [`ReconnectCheck::Lost`](crate::ReconnectCheck::Lost).
 ///
 /// In order: the sink's `TMDS_Config` in one write ([`TmdsLinkParams::sink_config`]; none
-/// when no write is due), with the output left running and no wait, as the ratio does not
-/// change; the source's scrambler set again to the link's, in case the source lost its
-/// state with the sink; and, on a scrambled link, bring-up's scrambling check. It does not
-/// touch the PHY's rate or clock ratio and does not stop the output.
+/// when no write is due), with the output left running; the source's scrambler set again
+/// to the link's, in case the source lost its state with the sink; and, on a scrambled
+/// link, bring-up's scrambling check. It does not touch the PHY's rate or clock ratio and
+/// does not stop the output, so there is no wait: the sink switches whenever it does,
+/// under a clock that never stopped.
+///
+/// After [`Lost`](crate::ReconnectCheck::Lost) on a 1/40 link, the sink's ratio bit was
+/// reset, so the write switches the sink's clock ratio with TMDS running, as Xilinx and
+/// Amlogic do. The DRM helper, i915 and dw-hdmi avoid exactly that with a full mode set,
+/// which is why a tear-down and a bring-up are the default way back. On a 1/10 link, or a
+/// sink that kept its bits (a check that ended `NotSet`), nothing switches.
 ///
 /// From `config` it reads `tmds_config_write`, `on_tmds_config_failure`, `check_window` and
 /// `check_interval`, and ignores the rest. A failed write under

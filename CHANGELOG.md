@@ -141,7 +141,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **The quick restore**, `procedure::quick_restore` and `TmdsLink::quick_restore` (with its
   `_with_events` form): the option to a tear-down and a bring-up after
   `ReconnectCheck::Lost`. The sink's `TMDS_Config` written again with the output running
-  and no wait, the source's scrambler set again to the link's, and bring-up's scrambling
+  (so after `Lost` on a 1/40 link the sink switches its clock ratio with TMDS running, as
+  Xilinx and Amlogic do; the full bring-up avoids that), the source's scrambler set again to
+  the link's, and bring-up's scrambling
   check on a scrambled link. It reads `tmds_config_write`, `on_tmds_config_failure` and the
   check's timing from `BringUpConfig`. `Restored` carries the write's time, the check and a
   failed write it carried on past (`write_failed`); `RestoreError` is `Scdc` (a

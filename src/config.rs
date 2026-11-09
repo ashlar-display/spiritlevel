@@ -233,6 +233,9 @@ pub enum OutputDuringSinkWrite {
     Stopped,
     /// Left running through the write, with the source's scrambler held off until after
     /// it, so the sink never receives scrambled TMDS before it has been told to expect it.
+    /// vc4's order: the PHY runs at the link's clock ratio from the start, so on a 1/40 link
+    /// the sink sees the 1/40 clock before its write. Tegra switches its clock mode only with
+    /// its scrambler, after the write, which `TmdsPhy` cannot do while transmitting.
     Running,
 }
 

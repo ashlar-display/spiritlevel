@@ -268,7 +268,11 @@ scrambled link above 340 Mcsc, with `BringUpConfig::DEFAULT`:
 orders. With `Running`, the PHY is configured with its scrambler off and the output started
 first (steps 3 and 5), then `TMDS_Config` is written and the wait spent, and only then the
 source's scrambler turned on; the deadline runs from the write to the scrambler, and the
-check from the scrambler.
+check from the scrambler. This is vc4's order: the PHY runs at the link's clock ratio from
+the start, so on a 1/40 link the sink sees the 1/40 clock before its write [18]. Tegra,
+which also writes with its output running, switches its clock mode only together with its
+scrambler, after the write [18]; `TmdsPhy` sets the ratio only with the output stopped, so
+that order cannot be expressed over it.
 
 **At or below 340 Mcsc** the same steps run, with these differences:
 
@@ -437,9 +441,14 @@ is the option.
 
 `quick_restore(link, config)` is Xilinx's way back [34], with the check added:
 
-1. **`TMDS_Config` in one write**, with the output left running and no wait, since the ratio
-   does not change. `tmds_config_write` and `on_tmds_config_failure` apply as in bring-up; a
-   write under `CarryOn` that fails is kept in `Restored::write_failed`.
+1. **`TMDS_Config` in one write**, with the output left running. There is no wait, because
+   the output never stops: the sink switches under a clock that keeps running. After `Lost`
+   on a 1/40 link the sink's ratio bit was reset, so this write switches the sink's clock
+   ratio with TMDS running, as Xilinx and Amlogic do; the DRM helper, i915 and dw-hdmi
+   avoid exactly that with a full mode set, their comments say [32][33], which is why the
+   full bring-up is the default. On a 1/10 link, or a sink that kept its bits (a check that
+   ended `NotSet`), nothing switches. `tmds_config_write` and `on_tmds_config_failure` apply
+   as in bring-up; a write under `CarryOn` that fails is kept in `Restored::write_failed`.
 2. **The source's scrambler set again** to the link's, as Xilinx does with the sink write
    [34] (Amlogic writes only the sink [35]): one PHY call that covers a source that lost its
    state with the sink. A plain link gets it too, set off.
