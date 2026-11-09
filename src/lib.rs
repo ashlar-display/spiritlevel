@@ -22,6 +22,8 @@ mod config;
 #[cfg(feature = "culvert")]
 mod culvert;
 mod error;
+mod event;
+mod outcome;
 mod params;
 mod scdc;
 mod types;
@@ -36,6 +38,8 @@ pub use config::{
     SinkClearTiming, SinkPresence, SourceVersionWrite, TearDownConfig, TmdsConfigWrite,
 };
 pub use error::{ParamsError, UpdateError};
+pub use event::{MAX_TEAR_DOWN_EVENTS, SinkClearSkip, TmdsEvent, TmdsEventKind, TmdsStep};
+pub use outcome::{SinkClear, TearDownError, TornDown};
 pub use params::{ScramblingDecision, ScramblingOff, TmdsLinkParams};
 pub use scdc::TmdsScdc;
 

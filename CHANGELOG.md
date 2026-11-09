@@ -52,6 +52,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `OnTmdsConfigFailure`, `tear_down_on_error` and its `TearDownConfig`), `TearDownConfig`
   (`clear_sink`, `SinkClearTiming`, `ScramblerOff`) and `SinkPresence`. Each has a
   `DEFAULT` and `const fn` setters.
+- **Diagnostics, starting with tear-down.** `TmdsEvent` (a `Timestamp` and a
+  `TmdsEventKind`), `Copy` and without type parameters: a failed step is recorded by its
+  `TmdsStep` and, for SCDC, its `DdcErrorKind`, never by the error value. Tear-down's kinds
+  (started, `TMDS_Config` written, sink clear skipped with its `SinkClearSkip`, scrambler
+  set, output stopped, step failed, ended) and its bound, `MAX_TEAR_DOWN_EVENTS`. Its
+  results: `TornDown`, `TearDownError` (every step attempted, the first failure of each kept)
+  and `SinkClear`.
 
 ### Changed
 
