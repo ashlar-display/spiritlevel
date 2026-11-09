@@ -25,7 +25,9 @@ use crate::types::{SinkTmdsConfig, SinkTmdsFacts, TmdsConfigReading};
 /// and a plain link's read-back); one for the PHY's configuration; two for the scrambler (off,
 /// then on, when unscrambled output runs through the write); one each for the wait, the
 /// output's start, the deadline, the scrambling check and a cancellation; the tear-down after
-/// an error or a cancellation ([`MAX_TEAR_DOWN_EVENTS`]); and its end.
+/// an error or a cancellation ([`MAX_TEAR_DOWN_EVENTS`]); and its end. One more than any
+/// bring-up records: a plain link's read-back and a scrambled link's deadline and check never
+/// come together.
 pub const MAX_BRING_UP_EVENTS: usize =
     1 + 2 + 2 + 1 + 2 + 1 + 2 + 1 + 1 + 1 + 1 + 1 + MAX_TEAR_DOWN_EVENTS + 1;
 

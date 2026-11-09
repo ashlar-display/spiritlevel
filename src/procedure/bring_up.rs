@@ -1798,58 +1798,80 @@ mod tests {
 
     #[test]
     fn no_combination_records_more_than_the_bound() {
-        for rate in [148_500, 594_000] {
-            for sink in [FRL_SINK, NO_FRL, SinkTmdsFacts::NONE] {
+        // A plain link, a link scrambled at a low rate and one above 340 Mcsc.
+        let links = |sink: SinkTmdsFacts| {
+            [
+                TmdsLinkParams::choose(
+                    148_500,
+                    sink,
+                    SourceTmdsFacts::new(false),
+                    TmdsPolicy::DEFAULT,
+                ),
+                TmdsLinkParams::choose(
+                    148_500,
+                    sink,
+                    SourceTmdsFacts::new(true),
+                    TmdsPolicy::DEFAULT,
+                ),
+                TmdsLinkParams::choose(
+                    594_000,
+                    sink,
+                    SourceTmdsFacts::new(false),
+                    TmdsPolicy::DEFAULT,
+                ),
+            ]
+        };
+        let lte = SinkTmdsFacts::new(true, true, true);
+        let mut most = 0;
+        for sink in [FRL_SINK, NO_FRL, lte, SinkTmdsFacts::NONE] {
+            for link in links(sink).into_iter().flatten() {
                 for running in [false, true] {
                     for whole in [false, true] {
-                        for fail in 0..11 {
-                            let Ok(link) = TmdsLinkParams::choose(
-                                rate,
-                                sink,
-                                SourceTmdsFacts::new(false),
-                                TmdsPolicy::DEFAULT,
-                            ) else {
-                                continue; // a rate the sink cannot take
-                            };
-                            let mut io = TestIo::new();
-                            match fail {
-                                1 => io.fail_scdc = Some(DdcErrorKind::Busy),
-                                2 => io.fail_scdc = Some(DdcErrorKind::Detached),
-                                3 => io.fail_configure = true,
-                                4 => io.fail_set_scrambling = true,
-                                5 => io.fail_start_output = true,
-                                6 => io.fail_stop_output = true,
-                                7 => {
-                                    io.fail_scdc = Some(DdcErrorKind::Busy);
-                                    io.fail_stop_output = true;
+                        for fail in 0..8 {
+                            for cancel in (0..=24).map(Some).chain([None]) {
+                                let mut io = TestIo::new();
+                                io.cancel_after_ops = cancel;
+                                match fail {
+                                    1 => io.fail_scdc = Some(DdcErrorKind::Busy),
+                                    2 => io.fail_scdc = Some(DdcErrorKind::Detached),
+                                    3 => io.fail_configure = true,
+                                    4 => io.fail_set_scrambling_on = true,
+                                    5 => io.fail_start_output = true,
+                                    6 => io.fail_stop_output = true,
+                                    7 => {
+                                        io.fail_scdc = Some(DdcErrorKind::Busy);
+                                        io.fail_stop_output = true;
+                                    }
+                                    _ => {}
                                 }
-                                8 => io.cancel_after_ops = Some(4),
-                                9 => io.cancel_after_ops = Some(8),
-                                10 => {
-                                    io.fail_scdc = Some(DdcErrorKind::Busy);
-                                    io.cancel_after_ops = Some(5);
+                                let mut config = BringUpConfig::DEFAULT
+                                    .with_clear_frl(ClearFrl::EveryScdcSink)
+                                    .with_source_version(SourceVersionWrite::IfSinkVersion1)
+                                    .with_scrambling_deadline(Duration::ZERO)
+                                    .with_check_window(Duration::from_millis(5))
+                                    .with_tear_down(TearDownConfig::DEFAULT.with_clear_sink(true));
+                                if running {
+                                    config.output_during_sink_write =
+                                        OutputDuringSinkWrite::Running;
                                 }
-                                _ => {}
+                                if whole {
+                                    config.tmds_config_write = TmdsConfigWrite::WholeByte;
+                                }
+                                let r = up(&mut io, &link, &config);
+                                most = most.max(r.count);
+                                let cancelled =
+                                    matches!(r.result, Ok(BringUpOutcome::Cancelled { .. }));
+                                assert_eq!(r.link_up().is_some(), r.result.is_ok() && !cancelled);
                             }
-                            let mut config = BringUpConfig::DEFAULT
-                                .with_clear_frl(ClearFrl::EveryScdcSink)
-                                .with_source_version(SourceVersionWrite::IfSinkVersion1)
-                                .with_scrambling_deadline(Duration::ZERO)
-                                .with_tear_down(TearDownConfig::DEFAULT.with_clear_sink(true));
-                            if running {
-                                config.output_during_sink_write = OutputDuringSinkWrite::Running;
-                            }
-                            if whole {
-                                config.tmds_config_write = TmdsConfigWrite::WholeByte;
-                            }
-                            let r = up(&mut io, &link, &config);
-                            let cancelled =
-                                matches!(r.result, Ok(BringUpOutcome::Cancelled { .. }));
-                            assert_eq!(r.link_up().is_some(), r.result.is_ok() && !cancelled);
                         }
                     }
                 }
             }
         }
+        // The sweep reaches the worst case: a scrambled link under Running with every SCDC
+        // call failing, cancelled in its check, then cleared. The bound is one above it,
+        // since a plain link's read-back and a scrambled link's deadline and check never
+        // come together.
+        assert_eq!(most, MAX_BRING_UP_EVENTS - 1);
     }
 }
