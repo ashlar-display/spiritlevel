@@ -44,7 +44,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`read_tmds_config`), `Scrambling_Status`, `Sink_Version` and `Source_Version`, and the FRL
   clear (`clear_frl_rate`, `clear_flt_update`). Its error is a `DdcError`, so a procedure
   can tell a failure that will pass from one that will not. A trait of the crate's own, so
-  an SCDC implementation without culvert can provide it.
+  an SCDC implementation without culvert can provide it; implemented for `&mut T` too, so a
+  caller can lend its client to a driver and keep it.
 - **The `culvert` feature: `TmdsScdc` for culvert's client** (`culvert::Scdc<T>`, over any
   `ScdcTransport`), with culvert's errors wrapped in `CulvertError`, whose `DdcError` kind
   is the transport's own, or `Unsupported` for a request culvert refuses. `update_tmds_config`

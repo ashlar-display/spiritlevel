@@ -77,6 +77,47 @@ pub trait TmdsScdc {
     fn clear_flt_update(&mut self) -> Result<bool, UpdateError<Self::Error>>;
 }
 
+/// The implementation behind a mutable reference, so a caller can lend its SCDC client to a
+/// driver and keep it.
+impl<T: TmdsScdc + ?Sized> TmdsScdc for &mut T {
+    type Error = T::Error;
+
+    fn write_tmds_config(&mut self, config: SinkTmdsConfig) -> Result<(), Self::Error> {
+        (**self).write_tmds_config(config)
+    }
+
+    fn update_tmds_config(
+        &mut self,
+        config: SinkTmdsConfig,
+    ) -> Result<(), UpdateError<Self::Error>> {
+        (**self).update_tmds_config(config)
+    }
+
+    fn read_tmds_config(&mut self) -> Result<TmdsConfigReading, Self::Error> {
+        (**self).read_tmds_config()
+    }
+
+    fn read_scrambling_status(&mut self) -> Result<ScramblingStatus, Self::Error> {
+        (**self).read_scrambling_status()
+    }
+
+    fn read_sink_version(&mut self) -> Result<u8, Self::Error> {
+        (**self).read_sink_version()
+    }
+
+    fn write_source_version(&mut self, version: u8) -> Result<(), Self::Error> {
+        (**self).write_source_version(version)
+    }
+
+    fn clear_frl_rate(&mut self) -> Result<(), Self::Error> {
+        (**self).clear_frl_rate()
+    }
+
+    fn clear_flt_update(&mut self) -> Result<bool, UpdateError<Self::Error>> {
+        (**self).clear_flt_update()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -206,6 +247,49 @@ mod tests {
         let status = sink.read_scrambling_status().unwrap();
         assert!(status.set);
         assert_eq!(status.raw(), 0x81);
+    }
+
+    #[test]
+    fn a_borrowed_implementation_forwards_every_call() {
+        fn exercise<T: TmdsScdc<Error = DdcErrorKind>>(
+            mut scdc: T,
+        ) -> (u8, bool, TmdsConfigReading, ScramblingStatus) {
+            let version = scdc.read_sink_version().unwrap();
+            scdc.write_source_version(1).unwrap();
+            scdc.clear_frl_rate().unwrap();
+            let was_set = scdc.clear_flt_update().unwrap();
+            scdc.update_tmds_config(SinkTmdsConfig::new(true, true))
+                .unwrap();
+            let read = scdc.read_tmds_config().unwrap();
+            scdc.write_tmds_config(SinkTmdsConfig::new(false, false))
+                .unwrap();
+            (
+                version,
+                was_set,
+                read,
+                scdc.read_scrambling_status().unwrap(),
+            )
+        }
+        let mut sink = Registers::new();
+        sink.regs[0x01] = 1;
+        sink.regs[0x21] = 0x01;
+        sink.regs[0x31] = 0x53;
+        sink.regs[0x10] = 0x20;
+        let (version, was_set, read, status) = exercise(&mut sink);
+        assert_eq!(
+            (version, was_set, read.raw, status.set),
+            (1, true, 0x03, true)
+        );
+        // The calls reached the lender's registers.
+        assert_eq!(
+            (
+                sink.regs[0x02],
+                sink.regs[0x31],
+                sink.regs[0x10],
+                sink.regs[0x20]
+            ),
+            (1, 0, 0, 0)
+        );
     }
 
     #[test]
