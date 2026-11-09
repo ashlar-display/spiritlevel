@@ -921,7 +921,7 @@ mod tests {
                 Op::WriteSourceVersion(1)
             ]
         );
-        let w: [_; 3] = core::array::from_fn(|i| *r.warnings.iter().nth(i).unwrap());
+        let w: [_; 3] = core::array::from_fn(|i| *r.warnings.iter_warnings().nth(i).unwrap());
         assert_eq!(
             w,
             [
@@ -946,7 +946,7 @@ mod tests {
         );
         assert_eq!(io.ops(), [Op::ReadSinkVersion]);
         assert_eq!(
-            r.warnings.iter().next(),
+            r.warnings.iter_warnings().next(),
             Some(&BringUpWarning::SinkVersionReadFailed(
                 DdcErrorKind::Timeout
             ))
@@ -986,7 +986,7 @@ mod tests {
         );
         assert_eq!(r.result, Ok(()));
         assert!(matches!(
-            r.warnings.iter().next(),
+            r.warnings.iter_warnings().next(),
             Some(BringUpWarning::SinkVersionReadFailed(
                 DdcErrorKind::Unsupported
             ))
@@ -1260,7 +1260,7 @@ mod tests {
         io.update_fails_at_write = true;
         let r = up(&mut io, &link(594_000, NO_FRL), &MAIN_ONLY);
         assert!(matches!(
-            r.link_up().unwrap().warnings.iter().next(),
+            r.link_up().unwrap().warnings.iter_warnings().next(),
             Some(BringUpWarning::TmdsConfigWriteFailed {
                 error: UpdateError::Write(DdcErrorKind::Busy),
                 ..
@@ -1299,7 +1299,7 @@ mod tests {
             assert_eq!(up.check.result, result);
             assert!(
                 up.warnings
-                    .iter()
+                    .iter_warnings()
                     .any(|w| *w == BringUpWarning::ScramblingNotConfirmed { result }),
                 "{result:?}"
             );
@@ -1316,7 +1316,13 @@ mod tests {
         io.scrambling_status = 0x01;
         let config = MAIN_ONLY.with_scrambling_deadline(Duration::from_micros(500));
         let r = up(&mut io, &link(594_000, NO_FRL), &config);
-        let w = r.link_up().unwrap().warnings.iter().next().copied();
+        let w = r
+            .link_up()
+            .unwrap()
+            .warnings
+            .iter_warnings()
+            .next()
+            .copied();
         assert!(
             matches!(w, Some(BringUpWarning::DeadlineMissed { by }) if by >= Duration::from_micros(500))
         );
@@ -1346,7 +1352,7 @@ mod tests {
         io.scrambling_status = 0x01;
         let r = up(&mut io, &link(594_000, NO_FRL), &MAIN_ONLY);
         assert_eq!(
-            r.link_up().unwrap().warnings.iter().next(),
+            r.link_up().unwrap().warnings.iter_warnings().next(),
             Some(&BringUpWarning::TmdsConfigWriteFailed {
                 error: UpdateError::Read(DdcErrorKind::Busy),
                 read_back: None
@@ -1378,7 +1384,13 @@ mod tests {
             &link(148_500, NO_FRL),
             &MAIN_ONLY.with_tmds_config_write(TmdsConfigWrite::WholeByte),
         );
-        let read_back = r.link_up().unwrap().warnings.iter().next().copied();
+        let read_back = r
+            .link_up()
+            .unwrap()
+            .warnings
+            .iter_warnings()
+            .next()
+            .copied();
         assert!(matches!(
             read_back,
             Some(BringUpWarning::TmdsConfigWriteFailed {
@@ -1520,7 +1532,7 @@ mod tests {
             r.link_up()
                 .unwrap()
                 .warnings
-                .iter()
+                .iter_warnings()
                 .any(|w| matches!(w, BringUpWarning::FrlRateClearFailed(_)))
         );
 
@@ -1663,7 +1675,7 @@ mod tests {
                 at: CancelPoint::Step(TmdsStep::ReadTmdsConfig),
                 warnings,
                 ..
-            }) if warnings.iter().any(|w| matches!(
+            }) if warnings.iter_warnings().any(|w| matches!(
                 w,
                 BringUpWarning::TmdsConfigWriteFailed { read_back: None, .. }
             ))

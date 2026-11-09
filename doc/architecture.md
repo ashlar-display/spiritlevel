@@ -670,7 +670,7 @@ pub enum BringUpWarning<S> {
     ScramblingNotConfirmed { result: CheckResult },          // NotSet or Unreadable
 }
 
-/// Fixed storage for the warnings, in the order they came: `iter`, `len`, `is_empty`.
+/// Fixed storage for the warnings, in the order they came: `iter_warnings`, `len`, `is_empty`.
 pub struct Warnings<S> { /* private */ }
 
 #[non_exhaustive]

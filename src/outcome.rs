@@ -122,7 +122,7 @@ impl<S> Warnings<S> {
     }
 
     /// The warnings, in the order they arose.
-    pub fn iter(&self) -> impl Iterator<Item = &BringUpWarning<S>> {
+    pub fn iter_warnings(&self) -> impl Iterator<Item = &BringUpWarning<S>> {
         self.list[..self.len].iter().flatten()
     }
 
@@ -413,7 +413,7 @@ mod tests {
             by: Duration::from_millis(3),
         });
         assert_eq!(w.len(), 2);
-        let mut it = w.iter();
+        let mut it = w.iter_warnings();
         assert_eq!(
             it.next(),
             Some(&BringUpWarning::SourceVersionWriteFailed(

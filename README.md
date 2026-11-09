@@ -109,7 +109,7 @@ fn show<S: TmdsScdc, P: TmdsPhy, K: Clock, D: Delay>(
             // Whether the sink reports scrambled TMDS, and what went wrong without
             // stopping the bring-up.
             let _seen = up.check.result == CheckResult::Set;
-            for _warning in up.warnings.iter() {}
+            for _warning in up.warnings.iter_warnings() {}
         }
         Ok(_cancelled) => {} // the cancel flag (`with_cancel`); never without one
         Err(_error) => {}    // the step that failed, and the tear-down that followed
