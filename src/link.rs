@@ -363,11 +363,15 @@ mod tests {
     use crate::outcome::SinkClear;
     use crate::types::{SinkTmdsFacts, SourceTmdsFacts, TmdsPolicy};
 
-    /// The sink's registers that matter here: `TMDS_Config` and the version registers.
+    /// The sink's registers that matter here: `TMDS_Config`, the version registers and the
+    /// FRL clear's.
     #[derive(Default)]
     struct Sink {
         tmds_config: u8,
+        sink_version: u8,
         source_version: u8,
+        flt_update: bool,
+        frl_clears: u32,
         writes: u32,
     }
 
@@ -401,7 +405,7 @@ mod tests {
         }
 
         fn read_sink_version(&mut self) -> Result<u8, DdcErrorKind> {
-            Ok(1)
+            Ok(self.sink_version)
         }
 
         fn write_source_version(&mut self, version: u8) -> Result<(), DdcErrorKind> {
@@ -410,11 +414,12 @@ mod tests {
         }
 
         fn clear_frl_rate(&mut self) -> Result<(), DdcErrorKind> {
+            self.frl_clears += 1;
             Ok(())
         }
 
         fn clear_flt_update(&mut self) -> Result<bool, UpdateError<DdcErrorKind>> {
-            Ok(false)
+            Ok(core::mem::take(&mut self.flt_update))
         }
     }
 
@@ -613,6 +618,16 @@ mod tests {
                 sink: SinkClear::NotRequested
             })
         );
+        // A flag that is not set lets a bring-up through.
+        let video = hdmi_hal::phy::TmdsVideo::new(
+            594_000,
+            hdmi_hal::ColorBitDepth::Depth8,
+            hdmi_hal::ColorFormat::Rgb444,
+        );
+        assert!(matches!(
+            link.bring_up(&scrambled(), video, &BringUpConfig::DEFAULT),
+            Ok(BringUpOutcome::Up(_))
+        ));
         // Tear-down is the recovery: a set flag does not stop it.
         flag.store(true, Ordering::Relaxed);
         assert!(
@@ -634,7 +649,8 @@ mod tests {
             })
         ));
         let (sink, _, _, _, cancel) = link.into_parts();
-        assert_eq!(sink.writes, 0);
+        // The first bring-up's write; the cancelled one made none.
+        assert_eq!(sink.writes, 1);
         assert!(cancel.is_cancelled());
         assert!(!NoCancel.is_cancelled());
     }
@@ -642,7 +658,12 @@ mod tests {
     #[test]
     fn the_sync_io_passes_every_call_through() {
         let time = SimTime::default();
-        let mut link = TmdsLink::new(Sink::default(), Phy::default(), &time, &time);
+        let sink = Sink {
+            sink_version: 2,
+            flt_update: true,
+            ..Sink::default()
+        };
+        let mut link = TmdsLink::new(sink, Phy::default(), &time, &time);
         let mut io = SyncIo(&mut link);
         let video = hdmi_hal::phy::TmdsVideo::new(
             148_500,
@@ -655,9 +676,10 @@ mod tests {
                 .unwrap();
             assert_eq!(io.read_tmds_config().await.unwrap().raw, 1);
             assert!(io.read_scrambling_status().await.unwrap().set);
-            assert_eq!(io.read_sink_version().await, Ok(1));
+            assert_eq!(io.read_sink_version().await, Ok(2));
             io.write_source_version(1).await.unwrap();
             io.clear_frl_rate().await.unwrap();
+            assert_eq!(io.clear_flt_update().await, Ok(true));
             assert_eq!(io.clear_flt_update().await, Ok(false));
             io.configure(TmdsPhyConfig::new(148_500, crate::ClockRatio::Div10, video))
                 .await
@@ -672,7 +694,7 @@ mod tests {
             assert!(!io.cancelled());
         });
         let (sink, phy, ..) = link.into_parts();
-        assert_eq!(sink.source_version, 1);
+        assert_eq!((sink.source_version, sink.frl_clears), (1, 1));
         assert!(phy.output && phy.configured.is_some());
     }
 }
