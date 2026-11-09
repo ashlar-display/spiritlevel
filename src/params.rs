@@ -57,6 +57,7 @@ pub struct TmdsLinkParams {
     clock_ratio: ClockRatio,
     decision: ScramblingDecision,
     sink_config: Option<SinkTmdsConfig>,
+    sink: SinkTmdsFacts,
 }
 
 impl TmdsLinkParams {
@@ -127,6 +128,7 @@ impl TmdsLinkParams {
                 clock_ratio: ClockRatio::Div40,
                 decision: ScramblingDecision::Required,
                 sink_config: Some(SinkTmdsConfig::new(true, true)),
+                sink,
             });
         }
         if rate_khz > THRESHOLD_KHZ {
@@ -170,6 +172,7 @@ impl TmdsLinkParams {
             clock_ratio: ClockRatio::Div10,
             decision,
             sink_config,
+            sink,
         })
     }
 
@@ -206,6 +209,13 @@ impl TmdsLinkParams {
     #[must_use]
     pub const fn sink_config(&self) -> Option<SinkTmdsConfig> {
         self.sink_config
+    }
+
+    /// The sink facts the link was chosen from: what the link assumes about the sink, which
+    /// a reconnect check compares with the sink's current facts.
+    #[must_use]
+    pub const fn sink(&self) -> SinkTmdsFacts {
+        self.sink
     }
 }
 

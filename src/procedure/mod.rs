@@ -6,8 +6,10 @@
 //! I/O completes at once polls it to completion without a runtime, an async driver awaits
 //! it. A test drives the core through one double.
 
+mod reconnect;
 mod tear_down;
 
+pub use reconnect::check_reconnect;
 pub use tear_down::tear_down;
 
 use core::time::Duration;

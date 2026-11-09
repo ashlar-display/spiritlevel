@@ -12,13 +12,17 @@ use hdmi_hal::ddc::DdcErrorKind;
 use hdmi_hal::time::Timestamp;
 
 use crate::config::{SinkPresence, TearDownConfig};
-use crate::outcome::SinkClear;
+use crate::outcome::{ReconnectCheck, SinkClear};
 use crate::params::TmdsLinkParams;
-use crate::types::SinkTmdsConfig;
+use crate::types::{SinkTmdsConfig, SinkTmdsFacts};
 
 /// The most events one tear-down records: its start, one each for the sink, the scrambler
 /// and the output, and its end.
 pub const MAX_TEAR_DOWN_EVENTS: usize = 5;
+
+/// The most events one reconnect check records: its start, the read (or its failure), and
+/// its end.
+pub const MAX_RECONNECT_CHECK_EVENTS: usize = 3;
 
 /// One step or decision of a procedure, stamped by the procedure from its own clock.
 #[non_exhaustive]
@@ -91,6 +95,26 @@ pub enum TmdsEventKind {
         /// steps anyway, as tear-down does.
         ends: bool,
     },
+    /// A reconnect check started.
+    #[non_exhaustive]
+    ReconnectCheckStarted {
+        /// The running link.
+        link: TmdsLinkParams,
+        /// The sink's facts now, as the caller read them after the hotplug.
+        current_sink: SinkTmdsFacts,
+    },
+    /// The sink's `TMDS_Config` was read.
+    #[non_exhaustive]
+    TmdsConfigRead {
+        /// The register as read, with its byte.
+        config: SinkTmdsConfig,
+    },
+    /// A reconnect check ended.
+    #[non_exhaustive]
+    ReconnectChecked {
+        /// What it found, with an error's kind in place of the error.
+        result: ReconnectCheck<DdcErrorKind>,
+    },
     /// A tear-down ended: what became of each part, without the error values.
     #[non_exhaustive]
     TearDownEnded {
@@ -109,6 +133,8 @@ pub enum TmdsEventKind {
 pub enum TmdsStep {
     /// Writing the sink's `TMDS_Config`.
     WriteTmdsConfig,
+    /// Reading the sink's `TMDS_Config`.
+    ReadTmdsConfig,
     /// Turning the source's scrambler on or off.
     SetScrambling,
     /// Stopping the output.

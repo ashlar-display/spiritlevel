@@ -40,9 +40,12 @@ pub use config::{
     SinkClearTiming, SinkPresence, SourceVersionWrite, TearDownConfig, TmdsConfigWrite,
 };
 pub use error::{ParamsError, UpdateError};
-pub use event::{MAX_TEAR_DOWN_EVENTS, SinkClearSkip, TmdsEvent, TmdsEventKind, TmdsStep};
+pub use event::{
+    MAX_RECONNECT_CHECK_EVENTS, MAX_TEAR_DOWN_EVENTS, SinkClearSkip, TmdsEvent, TmdsEventKind,
+    TmdsStep,
+};
 pub use link::{Cancel, NoCancel, TmdsLink};
-pub use outcome::{SinkClear, TearDownError, TornDown};
+pub use outcome::{ReconnectCheck, SinkClear, TearDownError, TornDown};
 pub use params::{ScramblingDecision, ScramblingOff, TmdsLinkParams};
 pub use scdc::TmdsScdc;
 

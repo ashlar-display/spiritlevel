@@ -1,5 +1,6 @@
 //! What the procedures return: for tear-down, [`TornDown`] or [`TearDownError`], with
-//! [`SinkClear`] saying what became of the sink.
+//! [`SinkClear`] saying what became of the sink; for the reconnect check,
+//! [`ReconnectCheck`].
 //!
 //! `S` is the SCDC error ([`TmdsScdc::Error`](crate::TmdsScdc::Error)), `P` the PHY error.
 
@@ -35,6 +36,41 @@ impl<S: DdcError> SinkClear<S> {
     }
 }
 
+/// What the reconnect check found.
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReconnectCheck<S> {
+    /// The sink's `TMDS_Config` holds what the link needs.
+    Matches,
+    /// The sink lost its `TMDS_Config`: it holds `read`, not what the link needs. The way
+    /// back is the caller's: a tear-down and a bring-up, or the quick restore.
+    Lost {
+        /// The register as read, with its byte.
+        read: crate::types::SinkTmdsConfig,
+    },
+    /// The read failed; nothing was decided.
+    Unreadable(S),
+    /// The sink has no SCDC: there is nothing to check.
+    NotApplicable,
+    /// The sink's current facts differ from those the link was chosen with: nothing was
+    /// read, as the link no longer fits the sink.
+    SinkChanged,
+}
+
+impl<S: DdcError> ReconnectCheck<S> {
+    /// The same result with the error's kind in place of the error, as an event carries it.
+    #[must_use]
+    pub fn kinds(&self) -> ReconnectCheck<DdcErrorKind> {
+        match self {
+            Self::Matches => ReconnectCheck::Matches,
+            Self::Lost { read } => ReconnectCheck::Lost { read: *read },
+            Self::Unreadable(e) => ReconnectCheck::Unreadable(e.kind()),
+            Self::NotApplicable => ReconnectCheck::NotApplicable,
+            Self::SinkChanged => ReconnectCheck::SinkChanged,
+        }
+    }
+}
+
 /// A tear-down in which every PHY step succeeded: the output is stopped.
 #[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -60,6 +96,23 @@ pub struct TearDownError<S, P> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reconnect_kinds_keep_the_result_and_drop_the_value() {
+        let read = crate::types::SinkTmdsConfig::from_read(false, false, 0x80);
+        assert_eq!(
+            ReconnectCheck::<DdcErrorKind>::Unreadable(DdcErrorKind::Detached).kinds(),
+            ReconnectCheck::Unreadable(DdcErrorKind::Detached)
+        );
+        for check in [
+            ReconnectCheck::<DdcErrorKind>::Matches,
+            ReconnectCheck::Lost { read },
+            ReconnectCheck::NotApplicable,
+            ReconnectCheck::SinkChanged,
+        ] {
+            assert_eq!(check.kinds(), check);
+        }
+    }
 
     #[test]
     fn kinds_keeps_the_result_and_drops_the_value() {

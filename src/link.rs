@@ -13,11 +13,11 @@ use hdmi_hal::time::{Clock, Delay, Timestamp};
 use crate::config::{SinkPresence, TearDownConfig};
 use crate::error::UpdateError;
 use crate::event::TmdsEvent;
-use crate::outcome::{TearDownError, TornDown};
+use crate::outcome::{ReconnectCheck, TearDownError, TornDown};
 use crate::params::TmdsLinkParams;
 use crate::procedure::{self, TmdsIo};
 use crate::scdc::TmdsScdc;
-use crate::types::{ScramblingStatus, SinkTmdsConfig};
+use crate::types::{ScramblingStatus, SinkTmdsConfig, SinkTmdsFacts};
 
 /// A flag the caller sets to stop a procedure: read before each step, wait and poll.
 ///
@@ -126,6 +126,33 @@ impl<S: TmdsScdc, P: TmdsPhy, K: Clock, D: Delay, X: Cancel> TmdsLink<S, P, K, D
             link,
             config,
             presence,
+            record,
+        ))
+    }
+}
+
+impl<S: TmdsScdc, P: TmdsPhy, K: Clock, D: Delay, X: Cancel> TmdsLink<S, P, K, D, X> {
+    /// Checks whether the sink still holds the `TMDS_Config` `link` needs; see
+    /// [`procedure::check_reconnect`].
+    pub fn check_reconnect(
+        &mut self,
+        link: &TmdsLinkParams,
+        current_sink: SinkTmdsFacts,
+    ) -> ReconnectCheck<S::Error> {
+        self.check_reconnect_with_events(link, current_sink, &mut |_| {})
+    }
+
+    /// [`check_reconnect`](Self::check_reconnect), calling `record` with each event.
+    pub fn check_reconnect_with_events(
+        &mut self,
+        link: &TmdsLinkParams,
+        current_sink: SinkTmdsFacts,
+        record: &mut impl FnMut(TmdsEvent),
+    ) -> ReconnectCheck<S::Error> {
+        block_on(procedure::check_reconnect(
+            &mut SyncIo(self),
+            link,
+            current_sink,
             record,
         ))
     }
@@ -375,6 +402,26 @@ mod tests {
         assert_eq!(sink.tmds_config, 0);
         assert!(!phy.output && !phy.scrambling);
         assert_eq!(phy.configured, None);
+    }
+
+    #[test]
+    fn check_reconnect_runs_over_the_parts() {
+        let time = SimTime::default();
+        let sink = Sink {
+            tmds_config: 0x03,
+            ..Sink::default()
+        };
+        let mut link = TmdsLink::new(sink, Phy::default(), &time, &time);
+        let params = scrambled();
+        assert_eq!(
+            link.check_reconnect(&params, params.sink()),
+            ReconnectCheck::Matches
+        );
+        let mut events = 0;
+        let result =
+            link.check_reconnect_with_events(&params, SinkTmdsFacts::NONE, &mut |_| events += 1);
+        assert_eq!(result, ReconnectCheck::SinkChanged);
+        assert_eq!(events, 2);
     }
 
     #[test]
