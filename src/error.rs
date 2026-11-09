@@ -23,6 +23,15 @@ pub enum ParamsError {
         /// ([`SourceTmdsFacts::scrambling`](crate::SourceTmdsFacts::scrambling) is clear).
         source_cannot_scramble: bool,
     },
+    /// The rate is above the source's own highest TMDS character rate
+    /// ([`SourceTmdsFacts::max_character_rate_khz`](crate::SourceTmdsFacts::max_character_rate_khz)).
+    #[non_exhaustive]
+    AboveSourceMaximum {
+        /// The TMDS character rate asked for, in kHz.
+        rate_khz: u32,
+        /// The source's highest TMDS character rate, in kHz.
+        max_khz: u32,
+    },
 }
 
 impl fmt::Display for ParamsError {
@@ -51,6 +60,10 @@ impl fmt::Display for ParamsError {
                     (None, false) => f.write_str(" the sink cannot take it"),
                 }
             }
+            Self::AboveSourceMaximum { rate_khz, max_khz } => write!(
+                f,
+                "TMDS character rate {rate_khz} kHz is above the source's maximum of {max_khz} kHz"
+            ),
         }
     }
 }
@@ -137,6 +150,18 @@ mod tests {
             text(&message_with_source(594_000, true, false, true)),
             "TMDS character rate 594000 kHz needs scrambling, but the sink has no SCDC, and \
              the source has no scrambler"
+        );
+    }
+
+    #[test]
+    fn display_names_the_source_maximum() {
+        let b = render(ParamsError::AboveSourceMaximum {
+            rate_khz: 594_000,
+            max_khz: 340_000,
+        });
+        assert_eq!(
+            text(&b),
+            "TMDS character rate 594000 kHz is above the source's maximum of 340000 kHz"
         );
     }
 

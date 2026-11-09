@@ -93,18 +93,29 @@ pub struct SourceTmdsFacts {
     /// The source can scramble at or below 340 Mcsc. Counts only with
     /// [`scrambling`](Self::scrambling).
     pub low_rate_scrambling: bool,
+    /// The source's own highest TMDS character rate, in kHz.
+    pub max_character_rate_khz: u32,
 }
 
 impl SourceTmdsFacts {
-    /// Facts stated by the caller. The source is taken to have a scrambler, as in 0.1, so
-    /// an existing caller's results do not change; [`with_scrambling`](Self::with_scrambling)
-    /// says otherwise.
+    /// Facts stated by the caller. The source is taken to have a scrambler and no rate
+    /// ceiling of its own, as in 0.1, so an existing caller's results do not change;
+    /// [`with_scrambling`](Self::with_scrambling) and
+    /// [`with_max_character_rate_khz`](Self::with_max_character_rate_khz) say otherwise.
     #[must_use]
     pub const fn new(low_rate_scrambling: bool) -> Self {
         Self {
             scrambling: true,
             low_rate_scrambling,
+            max_character_rate_khz: u32::MAX,
         }
+    }
+
+    /// Sets the source's own highest TMDS character rate, in kHz.
+    #[must_use]
+    pub const fn with_max_character_rate_khz(mut self, max_character_rate_khz: u32) -> Self {
+        self.max_character_rate_khz = max_character_rate_khz;
+        self
     }
 
     /// Sets whether the source has a TMDS scrambler.
@@ -116,12 +127,13 @@ impl SourceTmdsFacts {
 }
 
 impl From<&hdmi_hal::phy::TmdsPhyCapabilities> for SourceTmdsFacts {
-    /// The PHY's capabilities report: whether it has a scrambler, and whether it can use it
-    /// at or below 340 Mcsc.
+    /// The PHY's capabilities report: whether it has a scrambler, whether it can use it at
+    /// or below 340 Mcsc, and its highest character rate.
     fn from(caps: &hdmi_hal::phy::TmdsPhyCapabilities) -> Self {
         Self {
             scrambling: caps.scrambling,
             low_rate_scrambling: caps.scrambles_at_low_rate(),
+            max_character_rate_khz: caps.max_character_rate_khz,
         }
     }
 }

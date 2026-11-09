@@ -23,6 +23,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`ScramblingUnsupported` gains `source_cannot_scramble`), the plain 1/10 link at exactly
   340 000 kHz under `AtOrAbove340` and at or below the threshold (`ScramblingOff::source_cannot`).
   `new` still takes the source to have a scrambler, so 0.1's results do not change.
+- **`SourceTmdsFacts::max_character_rate_khz`**: the source's own highest TMDS character
+  rate, with `with_max_character_rate_khz` and filled by `From<&TmdsPhyCapabilities>`.
+  `choose` checks it first and refuses a rate above it with the new
+  `ParamsError::AboveSourceMaximum { rate_khz, max_khz }`, so a link the source cannot drive
+  never gets a sink configuration. `new` sets `u32::MAX`, so 0.1's results do not change.
 
 ### Changed
 

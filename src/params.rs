@@ -79,8 +79,9 @@ impl TmdsLinkParams {
     ///
     /// # Errors
     ///
-    /// [`ParamsError::ScramblingUnsupported`] for a rate above 340 000 kHz on a sink
-    /// without SCDC or scrambling support, or from a source without a scrambler.
+    /// [`ParamsError::AboveSourceMaximum`] for a rate above the source's own maximum,
+    /// checked first. [`ParamsError::ScramblingUnsupported`] for a rate above 340 000 kHz
+    /// on a sink without SCDC or scrambling support, or from a source without a scrambler.
     ///
     /// # Example
     ///
@@ -107,6 +108,13 @@ impl TmdsLinkParams {
         source: SourceTmdsFacts,
         policy: TmdsPolicy,
     ) -> Result<Self, ParamsError> {
+        if rate_khz > source.max_character_rate_khz {
+            // Before anything else: a link the source cannot drive gets no sink configuration.
+            return Err(ParamsError::AboveSourceMaximum {
+                rate_khz,
+                max_khz: source.max_character_rate_khz,
+            });
+        }
         let above_threshold = match policy.threshold {
             ScramblingThreshold::Above340 => rate_khz > THRESHOLD_KHZ,
             ScramblingThreshold::AtOrAbove340 => rate_khz >= THRESHOLD_KHZ,
@@ -514,12 +522,40 @@ mod tests {
                 .with_scrambling(true)
                 .with_low_rate_scrambling(true),
         );
-        assert_eq!(full, SourceTmdsFacts::new(true));
+        assert_eq!(
+            full,
+            SourceTmdsFacts::new(true).with_max_character_rate_khz(600_000)
+        );
     }
 
     #[test]
     fn new_keeps_a_scrambler_as_in_0_1() {
         assert!(SourceTmdsFacts::new(false).scrambling);
+        assert_eq!(SourceTmdsFacts::new(false).max_character_rate_khz, u32::MAX);
+    }
+
+    // ---- The source's own maximum ----
+
+    #[test]
+    fn rate_above_the_source_maximum_is_refused_first() {
+        let source = CAN.with_max_character_rate_khz(340_000);
+        assert!(TmdsLinkParams::choose(340_000, ALL, source, TmdsPolicy::DEFAULT).is_ok());
+        // Refused even where the sink could not take the rate either: the source's limit
+        // comes first.
+        assert_eq!(
+            TmdsLinkParams::choose(594_000, SinkTmdsFacts::NONE, source, TmdsPolicy::DEFAULT),
+            Err(ParamsError::AboveSourceMaximum {
+                rate_khz: 594_000,
+                max_khz: 340_000,
+            })
+        );
+    }
+
+    #[test]
+    fn source_maximum_comes_from_the_phy_capabilities() {
+        use hdmi_hal::phy::TmdsPhyCapabilities;
+        let facts = SourceTmdsFacts::from(&TmdsPhyCapabilities::new(297_000));
+        assert_eq!(facts.max_character_rate_khz, 297_000);
     }
 
     #[test]
