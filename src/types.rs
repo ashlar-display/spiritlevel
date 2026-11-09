@@ -83,20 +83,45 @@ impl From<Option<&display_types::cea861::HdmiForumSinkCap>> for SinkTmdsFacts {
 
 /// What the source's PHY can do.
 ///
-/// In 0.1 the caller states it; from 0.2 it is built from the PHY's capabilities report.
+/// Built from the PHY's capabilities report (`From<&TmdsPhyCapabilities>`), or stated by
+/// the caller with [`new`](Self::new) and the `with_…` setters.
 #[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct SourceTmdsFacts {
-    /// The source can scramble at or below 340 Mcsc.
+    /// The source has a TMDS scrambler.
+    pub scrambling: bool,
+    /// The source can scramble at or below 340 Mcsc. Counts only with
+    /// [`scrambling`](Self::scrambling).
     pub low_rate_scrambling: bool,
 }
 
 impl SourceTmdsFacts {
-    /// Facts stated by the caller.
+    /// Facts stated by the caller. The source is taken to have a scrambler, as in 0.1, so
+    /// an existing caller's results do not change; [`with_scrambling`](Self::with_scrambling)
+    /// says otherwise.
     #[must_use]
     pub const fn new(low_rate_scrambling: bool) -> Self {
         Self {
+            scrambling: true,
             low_rate_scrambling,
+        }
+    }
+
+    /// Sets whether the source has a TMDS scrambler.
+    #[must_use]
+    pub const fn with_scrambling(mut self, scrambling: bool) -> Self {
+        self.scrambling = scrambling;
+        self
+    }
+}
+
+impl From<&hdmi_hal::phy::TmdsPhyCapabilities> for SourceTmdsFacts {
+    /// The PHY's capabilities report: whether it has a scrambler, and whether it can use it
+    /// at or below 340 Mcsc.
+    fn from(caps: &hdmi_hal::phy::TmdsPhyCapabilities) -> Self {
+        Self {
+            scrambling: caps.scrambling,
+            low_rate_scrambling: caps.scrambles_at_low_rate(),
         }
     }
 }

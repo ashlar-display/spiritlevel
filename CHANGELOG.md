@@ -14,6 +14,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the same; what changes is that spiritlevel now depends on hdmi-hal, and with it always on
   display-types.
 
+### Added
+
+- **`SourceTmdsFacts::scrambling`**: whether the source has a TMDS scrambler, with
+  `with_scrambling` and `From<&TmdsPhyCapabilities>`, which fills it and
+  `low_rate_scrambling` from the PHY's capabilities report. `choose` treats a source without
+  a scrambler as it treats a sink that cannot take scrambling: refused above 340 000 kHz
+  (`ScramblingUnsupported` gains `source_cannot_scramble`), the plain 1/10 link at exactly
+  340 000 kHz under `AtOrAbove340` and at or below the threshold (`ScramblingOff::source_cannot`).
+  `new` still takes the source to have a scrambler, so 0.1's results do not change.
+
 ### Changed
 
 - **The README shows the "trusted publishing only" badge**: crates.io refuses token
