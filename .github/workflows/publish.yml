@@ -106,6 +106,13 @@ jobs:
       - name: Build (no_std, no default features)
         run: cargo build --locked --no-default-features --target thumbv7em-none-eabi
 
+      # The culvert feature: the adapter implementing the SCDC trait for culvert's client.
+      - name: Clippy (culvert)
+        run: cargo clippy --locked --all-targets --features culvert -- -D warnings
+
+      - name: Build (no_std, culvert)
+        run: cargo build --locked --features culvert --target thumbv7em-none-eabi
+
   # The MSRV check, as in ci.yml (see the comment there on how cargo-msrv is installed).
   msrv:
     name: MSRV

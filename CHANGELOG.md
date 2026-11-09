@@ -36,6 +36,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Internal
 
+- CI and the publish workflow's verify job lint and build the `culvert` feature, for the
+  host and the bare `thumbv7em-none-eabi` target.
 - Releases publish through crates.io trusted publishing only: the first-publish token path
   in publish.yml and the first-release path in release-prep, used once for 0.1.0, are
   removed.

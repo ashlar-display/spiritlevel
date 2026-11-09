@@ -66,6 +66,13 @@ jobs:
       - name: Build (no_std, no default features)
         run: cargo build --locked --no-default-features --target thumbv7em-none-eabi
 
+      # The culvert feature: the adapter implementing the SCDC trait for culvert's client.
+      - name: Clippy (culvert)
+        run: cargo clippy --locked --all-targets --features culvert -- -D warnings
+
+      - name: Build (no_std, culvert)
+        run: cargo build --locked --features culvert --target thumbv7em-none-eabi
+
   # cargo-msrv reads the MSRV from Cargo.toml's rust-version and runs the checks on that
   # toolchain. Built from crates.io with --locked at a pinned version, not install-action:
   # it has no manifest for cargo-msrv and would fall back to an unpinned cargo-binstall
