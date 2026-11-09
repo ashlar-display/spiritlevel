@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Breaking changes
+
+- **`ClockRatio` is hdmi-hal's `TmdsClockRatio`**, re-exported under the old name, so the
+  link parameters pass straight to the PHY. The variants (`Div10`, `Div40`) and derives are
+  the same; what changes is that spiritlevel now depends on hdmi-hal, and with it always on
+  display-types.
+
 ### Changed
 
 - **The README shows the "trusted publishing only" badge**: crates.io refuses token

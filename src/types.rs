@@ -1,16 +1,10 @@
 //! The inputs and register contents: `ClockRatio`, `ScramblingThreshold`, `SinkTmdsFacts`,
 //! `SourceTmdsFacts`, `TmdsPolicy` and `SinkTmdsConfig`.
 
-/// The TMDS bit clock ratio: the TMDS clock runs at the bit rate divided by 10 or by 40.
-///
-/// Exhaustive: the sink's `TMDS_Bit_Clock_Ratio` is a single bit.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum ClockRatio {
-    /// The TMDS clock is the bit rate / 10 (the character rate).
-    Div10,
-    /// The TMDS clock is the bit rate / 40 (a quarter of the character rate).
-    Div40,
-}
+/// The TMDS bit clock ratio, hdmi-hal's `TmdsClockRatio`: the TMDS clock runs at the bit
+/// rate divided by 10 or by 40. One type, so the link parameters pass straight to
+/// `TmdsPhy::configure`.
+pub use hdmi_hal::phy::TmdsClockRatio as ClockRatio;
 
 /// Which TMDS character rate first requires scrambling and the 1/40 clock ratio.
 ///

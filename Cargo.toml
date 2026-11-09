@@ -17,6 +17,16 @@ all-features = true
 
 [features]
 default = ["display-types"]
+culvert = ["dep:culvert"]
 
 [dependencies]
 display-types = { version = "0.5", default-features = false, optional = true }
+hdmi-hal = { version = "0.6", default-features = false }
+culvert = { version = "0.3", default-features = false, optional = true }
+
+# Prototype against hdmi-hal's unreleased breaking release (release order step 2): pushed
+# commits of hdmi-hal's feat/tmds-phy branch and of culvert's feat/tmds-config, which
+# builds on it (the `culvert` feature), moved by hand. Removed when they are released.
+[patch.crates-io]
+hdmi-hal = { git = "https://github.com/ashlar-display/hdmi-hal", rev = "35131adfe65067620e004665f6e2a88a4dbd6fb9" }
+culvert = { git = "https://github.com/ashlar-display/culvert", rev = "17f00d86e7acc91e010ea07df010c20fab9019fa" }
