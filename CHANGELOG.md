@@ -66,6 +66,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the order `SinkClearTiming` and `ScramblerOff` give, writing nothing to a plain link, a
   sink without SCDC or a sink the caller says is gone. Every step is attempted: a failed
   sink write is a warning, a failed PHY call still lets the output stop.
+- **`TmdsLink`, the sync driver**, over a `TmdsScdc`, a `TmdsPhy`, a `Clock` and a `Delay`
+  (one value can serve as both through a reference), with `tear_down` and
+  `tear_down_with_events`: the procedure runs to completion before the call returns, with
+  no runtime. A cancel flag through the `Cancel` trait, implemented for `&AtomicBool`, with
+  `NoCancel` the default (`with_cancel`); `into_parts` gives the parts back.
 
 ### Changed
 

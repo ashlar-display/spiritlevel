@@ -23,6 +23,7 @@ mod config;
 mod culvert;
 mod error;
 mod event;
+mod link;
 mod outcome;
 mod params;
 pub mod procedure;
@@ -40,6 +41,7 @@ pub use config::{
 };
 pub use error::{ParamsError, UpdateError};
 pub use event::{MAX_TEAR_DOWN_EVENTS, SinkClearSkip, TmdsEvent, TmdsEventKind, TmdsStep};
+pub use link::{Cancel, NoCancel, TmdsLink};
 pub use outcome::{SinkClear, TearDownError, TornDown};
 pub use params::{ScramblingDecision, ScramblingOff, TmdsLinkParams};
 pub use scdc::TmdsScdc;

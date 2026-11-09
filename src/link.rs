@@ -1,0 +1,440 @@
+//! The sync driver: [`TmdsLink`] runs the procedures over a [`TmdsScdc`], a `TmdsPhy`, a
+//! `Clock` and a `Delay`, with an optional [`Cancel`] flag.
+
+use core::future::Future;
+use core::pin::pin;
+use core::sync::atomic::{AtomicBool, Ordering};
+use core::task::{Context, Poll, Waker};
+use core::time::Duration;
+
+use hdmi_hal::phy::{TmdsPhy, TmdsPhyConfig};
+use hdmi_hal::time::{Clock, Delay, Timestamp};
+
+use crate::config::{SinkPresence, TearDownConfig};
+use crate::error::UpdateError;
+use crate::event::TmdsEvent;
+use crate::outcome::{TearDownError, TornDown};
+use crate::params::TmdsLinkParams;
+use crate::procedure::{self, TmdsIo};
+use crate::scdc::TmdsScdc;
+use crate::types::{ScramblingStatus, SinkTmdsConfig};
+
+/// A flag the caller sets to stop a procedure: read before each step, wait and poll.
+///
+/// The procedures never clear it: the caller resets it before its next call.
+pub trait Cancel {
+    /// Whether the caller has asked the procedure to stop.
+    fn is_cancelled(&self) -> bool;
+}
+
+/// Never cancels: the default.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+pub struct NoCancel;
+
+impl Cancel for NoCancel {
+    fn is_cancelled(&self) -> bool {
+        false
+    }
+}
+
+/// A flag another task or an interrupt handler sets.
+impl Cancel for &AtomicBool {
+    fn is_cancelled(&self) -> bool {
+        self.load(Ordering::Relaxed)
+    }
+}
+
+/// What a tear-down returns, over the parts' error types.
+type TearDownResult<S, P> = Result<
+    TornDown<<S as TmdsScdc>::Error>,
+    TearDownError<<S as TmdsScdc>::Error, <P as TmdsPhy>::Error>,
+>;
+
+/// The TMDS procedures over sync parts: the sink's SCDC, the PHY, a clock and a delay, and a
+/// cancel flag ([`NoCancel`] unless [`with_cancel`](Self::with_cancel) gives one).
+///
+/// Each procedure runs to completion before it returns: the parts' calls complete at once,
+/// and the delay blocks. One clock-and-delay value can serve as both through a reference,
+/// as `Clock` and `Delay` implemented for `&T`.
+#[derive(Debug)]
+pub struct TmdsLink<S, P, K, D, X = NoCancel> {
+    scdc: S,
+    phy: P,
+    clock: K,
+    delay: D,
+    cancel: X,
+}
+
+impl<S: TmdsScdc, P: TmdsPhy, K: Clock, D: Delay> TmdsLink<S, P, K, D, NoCancel> {
+    /// The driver over its parts, never cancelled.
+    pub fn new(scdc: S, phy: P, clock: K, delay: D) -> Self {
+        Self {
+            scdc,
+            phy,
+            clock,
+            delay,
+            cancel: NoCancel,
+        }
+    }
+}
+
+impl<S: TmdsScdc, P: TmdsPhy, K: Clock, D: Delay, X: Cancel> TmdsLink<S, P, K, D, X> {
+    /// The same driver with `cancel` as its cancel flag.
+    pub fn with_cancel<X2: Cancel>(self, cancel: X2) -> TmdsLink<S, P, K, D, X2> {
+        TmdsLink {
+            scdc: self.scdc,
+            phy: self.phy,
+            clock: self.clock,
+            delay: self.delay,
+            cancel,
+        }
+    }
+
+    /// The parts back.
+    pub fn into_parts(self) -> (S, P, K, D, X) {
+        (self.scdc, self.phy, self.clock, self.delay, self.cancel)
+    }
+
+    /// Stops the TMDS link `link` describes; see [`procedure::tear_down`].
+    ///
+    /// # Errors
+    ///
+    /// [`TearDownError`] when a PHY step failed; every step was still attempted.
+    pub fn tear_down(
+        &mut self,
+        link: &TmdsLinkParams,
+        config: &TearDownConfig,
+        presence: SinkPresence,
+    ) -> TearDownResult<S, P> {
+        self.tear_down_with_events(link, config, presence, &mut |_| {})
+    }
+
+    /// [`tear_down`](Self::tear_down), calling `record` with each event.
+    ///
+    /// # Errors
+    ///
+    /// As [`tear_down`](Self::tear_down).
+    pub fn tear_down_with_events(
+        &mut self,
+        link: &TmdsLinkParams,
+        config: &TearDownConfig,
+        presence: SinkPresence,
+        record: &mut impl FnMut(TmdsEvent),
+    ) -> TearDownResult<S, P> {
+        block_on(procedure::tear_down(
+            &mut SyncIo(self),
+            link,
+            config,
+            presence,
+            record,
+        ))
+    }
+}
+
+/// Polls `future` once: the sync parts' calls complete at once, so it is ready.
+fn block_on<T>(future: impl Future<Output = T>) -> T {
+    let mut future = pin!(future);
+    match future
+        .as_mut()
+        .poll(&mut Context::from_waker(Waker::noop()))
+    {
+        Poll::Ready(output) => output,
+        Poll::Pending => unreachable!("spiritlevel's sync driver waited on I/O"),
+    }
+}
+
+/// [`TmdsIo`] over a [`TmdsLink`]'s parts: each operation is the sync call itself.
+struct SyncIo<'a, S, P, K, D, X>(&'a mut TmdsLink<S, P, K, D, X>);
+
+impl<S: TmdsScdc, P: TmdsPhy, K: Clock, D: Delay, X: Cancel> TmdsIo for SyncIo<'_, S, P, K, D, X> {
+    type ScdcError = S::Error;
+    type PhyError = P::Error;
+
+    async fn write_tmds_config(&mut self, config: SinkTmdsConfig) -> Result<(), S::Error> {
+        self.0.scdc.write_tmds_config(config)
+    }
+
+    async fn update_tmds_config(
+        &mut self,
+        config: SinkTmdsConfig,
+    ) -> Result<(), UpdateError<S::Error>> {
+        self.0.scdc.update_tmds_config(config)
+    }
+
+    async fn read_tmds_config(&mut self) -> Result<SinkTmdsConfig, S::Error> {
+        self.0.scdc.read_tmds_config()
+    }
+
+    async fn read_scrambling_status(&mut self) -> Result<ScramblingStatus, S::Error> {
+        self.0.scdc.read_scrambling_status()
+    }
+
+    async fn read_sink_version(&mut self) -> Result<u8, S::Error> {
+        self.0.scdc.read_sink_version()
+    }
+
+    async fn write_source_version(&mut self, version: u8) -> Result<(), S::Error> {
+        self.0.scdc.write_source_version(version)
+    }
+
+    async fn clear_frl_rate(&mut self) -> Result<(), S::Error> {
+        self.0.scdc.clear_frl_rate()
+    }
+
+    async fn clear_flt_update(&mut self) -> Result<bool, UpdateError<S::Error>> {
+        self.0.scdc.clear_flt_update()
+    }
+
+    async fn configure(&mut self, config: TmdsPhyConfig) -> Result<(), P::Error> {
+        self.0.phy.configure(config)
+    }
+
+    async fn set_scrambling(&mut self, enabled: bool) -> Result<(), P::Error> {
+        self.0.phy.set_scrambling(enabled)
+    }
+
+    async fn start_output(&mut self) -> Result<(), P::Error> {
+        self.0.phy.start_output()
+    }
+
+    async fn stop_output(&mut self) -> Result<(), P::Error> {
+        self.0.phy.stop_output()
+    }
+
+    fn now(&self) -> Timestamp {
+        self.0.clock.now()
+    }
+
+    async fn delay(&mut self, duration: Duration) {
+        self.0.delay.delay(duration);
+    }
+
+    fn cancelled(&self) -> bool {
+        self.0.cancel.is_cancelled()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use core::cell::Cell;
+
+    use hdmi_hal::ddc::DdcErrorKind;
+    use hdmi_hal::phy::TmdsPhyCapabilities;
+
+    use super::*;
+    use crate::outcome::SinkClear;
+    use crate::types::{SinkTmdsFacts, SourceTmdsFacts, TmdsPolicy};
+
+    /// The sink's registers that matter here: `TMDS_Config` and the version registers.
+    #[derive(Default)]
+    struct Sink {
+        tmds_config: u8,
+        source_version: u8,
+        writes: u32,
+    }
+
+    impl TmdsScdc for Sink {
+        type Error = DdcErrorKind;
+
+        fn write_tmds_config(&mut self, c: SinkTmdsConfig) -> Result<(), DdcErrorKind> {
+            self.writes += 1;
+            self.tmds_config =
+                u8::from(c.scrambling_enable) | (u8::from(c.high_tmds_clock_ratio) << 1);
+            Ok(())
+        }
+
+        fn update_tmds_config(
+            &mut self,
+            c: SinkTmdsConfig,
+        ) -> Result<(), UpdateError<DdcErrorKind>> {
+            self.write_tmds_config(c).map_err(UpdateError::Write)
+        }
+
+        fn read_tmds_config(&mut self) -> Result<SinkTmdsConfig, DdcErrorKind> {
+            let raw = self.tmds_config;
+            Ok(SinkTmdsConfig::from_read(raw & 1 != 0, raw & 2 != 0, raw))
+        }
+
+        fn read_scrambling_status(&mut self) -> Result<ScramblingStatus, DdcErrorKind> {
+            Ok(ScramblingStatus::new(true, 1))
+        }
+
+        fn read_sink_version(&mut self) -> Result<u8, DdcErrorKind> {
+            Ok(1)
+        }
+
+        fn write_source_version(&mut self, version: u8) -> Result<(), DdcErrorKind> {
+            self.source_version = version;
+            Ok(())
+        }
+
+        fn clear_frl_rate(&mut self) -> Result<(), DdcErrorKind> {
+            Ok(())
+        }
+
+        fn clear_flt_update(&mut self) -> Result<bool, UpdateError<DdcErrorKind>> {
+            Ok(false)
+        }
+    }
+
+    /// A PHY that tracks whether it transmits and scrambles.
+    #[derive(Default)]
+    struct Phy {
+        output: bool,
+        scrambling: bool,
+        configured: Option<TmdsPhyConfig>,
+    }
+
+    impl TmdsPhy for Phy {
+        type Error = ();
+
+        fn capabilities(&self) -> TmdsPhyCapabilities {
+            TmdsPhyCapabilities::new(600_000).with_scrambling(true)
+        }
+
+        fn configure(&mut self, config: TmdsPhyConfig) -> Result<(), ()> {
+            self.configured = Some(config);
+            Ok(())
+        }
+
+        fn set_scrambling(&mut self, enabled: bool) -> Result<(), ()> {
+            self.scrambling = enabled;
+            Ok(())
+        }
+
+        fn start_output(&mut self) -> Result<(), ()> {
+            self.output = true;
+            Ok(())
+        }
+
+        fn stop_output(&mut self) -> Result<(), ()> {
+            self.output = false;
+            Ok(())
+        }
+    }
+
+    /// One time source as both clock and delay, shared by reference.
+    #[derive(Default)]
+    struct SimTime {
+        now: Cell<u64>,
+    }
+
+    impl Clock for &SimTime {
+        fn now(&self) -> Timestamp {
+            Timestamp::from_micros(self.now.get())
+        }
+    }
+
+    impl Delay for &SimTime {
+        fn delay(&mut self, duration: Duration) {
+            let micros = u64::try_from(duration.as_micros()).unwrap();
+            self.now.set(self.now.get() + micros);
+        }
+    }
+
+    fn scrambled() -> TmdsLinkParams {
+        TmdsLinkParams::choose(
+            594_000,
+            SinkTmdsFacts::new(true, true, false),
+            SourceTmdsFacts::from(&Phy::default().capabilities()),
+            TmdsPolicy::DEFAULT,
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn tear_down_runs_over_the_parts() {
+        let time = SimTime::default();
+        let sink = Sink {
+            tmds_config: 0x03,
+            ..Sink::default()
+        };
+        let phy = Phy {
+            output: true,
+            scrambling: true,
+            ..Phy::default()
+        };
+        let mut link = TmdsLink::new(sink, phy, &time, &time);
+
+        let mut events = 0;
+        let result = link.tear_down_with_events(
+            &scrambled(),
+            &TearDownConfig::DEFAULT.with_clear_sink(true),
+            SinkPresence::Present,
+            &mut |_| events += 1,
+        );
+        assert_eq!(
+            result,
+            Ok(TornDown {
+                sink: SinkClear::Cleared
+            })
+        );
+        assert_eq!(events, crate::MAX_TEAR_DOWN_EVENTS);
+
+        let (sink, phy, ..) = link.into_parts();
+        assert_eq!(sink.tmds_config, 0);
+        assert!(!phy.output && !phy.scrambling);
+        assert_eq!(phy.configured, None);
+    }
+
+    #[test]
+    fn the_plain_form_and_a_cancel_flag() {
+        let time = SimTime::default();
+        let flag = AtomicBool::new(false);
+        let mut link =
+            TmdsLink::new(Sink::default(), Phy::default(), &time, &time).with_cancel(&flag);
+        assert_eq!(
+            link.tear_down(&scrambled(), &TearDownConfig::DEFAULT, SinkPresence::Gone),
+            Ok(TornDown {
+                sink: SinkClear::NotRequested
+            })
+        );
+        // Tear-down is the recovery: a set flag does not stop it.
+        flag.store(true, Ordering::Relaxed);
+        assert!(
+            link.tear_down(&scrambled(), &TearDownConfig::DEFAULT, SinkPresence::Gone)
+                .is_ok()
+        );
+        let (sink, _, _, _, cancel) = link.into_parts();
+        assert_eq!(sink.writes, 0);
+        assert!(cancel.is_cancelled());
+        assert!(!NoCancel.is_cancelled());
+    }
+
+    #[test]
+    fn the_sync_io_passes_every_call_through() {
+        let time = SimTime::default();
+        let mut link = TmdsLink::new(Sink::default(), Phy::default(), &time, &time);
+        let mut io = SyncIo(&mut link);
+        let video = hdmi_hal::phy::TmdsVideo::new(
+            148_500,
+            hdmi_hal::ColorBitDepth::Depth8,
+            hdmi_hal::ColorFormat::Rgb444,
+        );
+        block_on(async {
+            io.update_tmds_config(SinkTmdsConfig::new(true, false))
+                .await
+                .unwrap();
+            assert_eq!(io.read_tmds_config().await.unwrap().raw(), Some(1));
+            assert!(io.read_scrambling_status().await.unwrap().set);
+            assert_eq!(io.read_sink_version().await, Ok(1));
+            io.write_source_version(1).await.unwrap();
+            io.clear_frl_rate().await.unwrap();
+            assert_eq!(io.clear_flt_update().await, Ok(false));
+            io.configure(TmdsPhyConfig::new(148_500, crate::ClockRatio::Div10, video))
+                .await
+                .unwrap();
+            io.start_output().await.unwrap();
+            let before = io.now();
+            io.delay(Duration::from_millis(1)).await;
+            assert_eq!(
+                io.now().checked_duration_since(before),
+                Some(Duration::from_millis(1))
+            );
+            assert!(!io.cancelled());
+        });
+        let (sink, phy, ..) = link.into_parts();
+        assert_eq!(sink.source_version, 1);
+        assert!(phy.output && phy.configured.is_some());
+    }
+}
