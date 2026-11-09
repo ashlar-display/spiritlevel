@@ -57,5 +57,5 @@ pub use scdc::TmdsScdc;
 pub use crate::culvert::CulvertError;
 pub use types::{
     ClockRatio, ScramblingStatus, ScramblingThreshold, SinkTmdsConfig, SinkTmdsFacts,
-    SourceTmdsFacts, TmdsPolicy,
+    SourceTmdsFacts, TmdsConfigGate, TmdsPolicy,
 };

@@ -19,7 +19,8 @@ use super::TmdsIo;
 /// not prove the same sink; telling sinks apart by their EDID is the caller's.
 ///
 /// Otherwise one read, compared with [`TmdsLinkParams::sink_config`] on both bits, a plain
-/// link included (its expected value is both bits 0). A sink without SCDC is
+/// link included (its expected value is both bits 0). A link with no write due (a sink
+/// without SCDC, or a plain link the policy's gate leaves unwritten) is
 /// [`ReconnectCheck::NotApplicable`]. The check writes nothing and never changes the link;
 /// a failed read is reported, not acted on. Not cancelled: it is one read.
 ///

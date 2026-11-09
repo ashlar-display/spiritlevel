@@ -92,6 +92,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`FrlRateCleared`, `FltUpdateCleared`, `FrlClearSkipped` with its `FrlClearSkip`) and
   `Source_Version` (`SinkVersionRead`, `SourceVersionWritten`, `SourceVersionSkipped` with its
   `SourceVersionSkip`).
+- **`TmdsPolicy::tmds_config_gate`**: which sinks get the `TMDS_Config` write on a plain
+  link, `TmdsConfigGate::AnyScdcSink` (the default, 0.1's rule) or `ScramblingSink`, with
+  `with_tmds_config_gate`. Under `ScramblingSink`, a plain link on a sink with SCDC but no
+  scrambling support gets no write: `sink_config()` is `None` exactly when no write is due,
+  and is unchanged under the default.
 
 ### Changed
 

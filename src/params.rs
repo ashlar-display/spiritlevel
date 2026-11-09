@@ -3,7 +3,8 @@
 
 use crate::error::ParamsError;
 use crate::types::{
-    ClockRatio, ScramblingThreshold, SinkTmdsConfig, SinkTmdsFacts, SourceTmdsFacts, TmdsPolicy,
+    ClockRatio, ScramblingThreshold, SinkTmdsConfig, SinkTmdsFacts, SourceTmdsFacts,
+    TmdsConfigGate, TmdsPolicy,
 };
 
 /// The rate, in kHz, that the threshold is measured against: 340 Mcsc.
@@ -76,7 +77,8 @@ impl TmdsLinkParams {
     ///   plain 1/10 link, and the flag that says why.
     /// - A source without a scrambler is treated as a sink that cannot take scrambling:
     ///   refused above 340 000 kHz, unscrambled at or below.
-    /// - A sink without SCDC gets no `TMDS_Config` value.
+    /// - A sink without SCDC gets no `TMDS_Config` value, nor does a plain link on a sink
+    ///   without scrambling support under [`TmdsConfigGate::ScramblingSink`].
     ///
     /// # Errors
     ///
@@ -162,7 +164,14 @@ impl TmdsLinkParams {
         } else {
             ScramblingDecision::Off(off)
         };
-        let sink_config = if sink.scdc_present {
+        // A scrambled link always writes; a plain one as the policy's gate says.
+        let write_due = sink.scdc_present
+            && (scrambled
+                || match policy.tmds_config_gate {
+                    TmdsConfigGate::ScramblingSink => sink.scrambling_supported,
+                    _ => true,
+                });
+        let sink_config = if write_due {
             Some(SinkTmdsConfig::new(scrambled, false))
         } else {
             None
@@ -204,8 +213,8 @@ impl TmdsLinkParams {
         self.decision
     }
 
-    /// What the sink's `TMDS_Config` must hold; `None` for a sink without SCDC, whose
-    /// register is not written.
+    /// What the sink's `TMDS_Config` must hold; `None` exactly when no write is due: a sink
+    /// without SCDC, or a plain link the policy's [`TmdsConfigGate`] leaves unwritten.
     #[must_use]
     pub const fn sink_config(&self) -> Option<SinkTmdsConfig> {
         self.sink_config
@@ -239,6 +248,8 @@ mod tests {
         ScramblingThreshold::AtOrAbove340,
     ];
     const BOOLS: [bool; 2] = [false, true];
+    const GATES: [TmdsConfigGate; 2] =
+        [TmdsConfigGate::AnyScdcSink, TmdsConfigGate::ScramblingSink];
 
     /// Calls `f` with every combination of inputs over [`RATES`].
     fn for_all(mut f: impl FnMut(u32, SinkTmdsFacts, SourceTmdsFacts, TmdsPolicy)) {
@@ -250,14 +261,17 @@ mod tests {
                             for src in BOOLS {
                                 for pol in BOOLS {
                                     for threshold in THRESHOLDS {
-                                        f(
-                                            rate,
-                                            SinkTmdsFacts::new(scdc, supported, lte),
-                                            SourceTmdsFacts::new(src).with_scrambling(scr),
-                                            TmdsPolicy::DEFAULT
-                                                .with_low_rate_scrambling(pol)
-                                                .with_threshold(threshold),
-                                        );
+                                        for gate in GATES {
+                                            f(
+                                                rate,
+                                                SinkTmdsFacts::new(scdc, supported, lte),
+                                                SourceTmdsFacts::new(src).with_scrambling(scr),
+                                                TmdsPolicy::DEFAULT
+                                                    .with_low_rate_scrambling(pol)
+                                                    .with_threshold(threshold)
+                                                    .with_tmds_config_gate(gate),
+                                            );
+                                        }
                                     }
                                 }
                             }
@@ -326,7 +340,13 @@ mod tests {
             );
 
             match link.sink_config() {
-                None => assert!(!sink.scdc_present),
+                // `None` exactly when no write is due.
+                None => assert!(
+                    !sink.scdc_present
+                        || (!link.scrambling()
+                            && policy.tmds_config_gate == TmdsConfigGate::ScramblingSink
+                            && !sink.scrambling_supported)
+                ),
                 Some(config) => {
                     assert!(sink.scdc_present);
                     assert_eq!(config.scrambling_enable, link.scrambling());
@@ -566,6 +586,21 @@ mod tests {
         use hdmi_hal::phy::TmdsPhyCapabilities;
         let facts = SourceTmdsFacts::from(&TmdsPhyCapabilities::new(297_000));
         assert_eq!(facts.max_character_rate_khz, 297_000);
+    }
+
+    #[test]
+    fn the_gate_decides_a_plain_links_write_on_a_sink_without_scrambling_support() {
+        // SCDC, but no scrambling support (Max_TMDS_Character_Rate 0).
+        let sink = SinkTmdsFacts::new(true, false, false);
+        let any = TmdsLinkParams::choose(148_500, sink, CAN, TmdsPolicy::DEFAULT).unwrap();
+        assert_eq!(any.sink_config(), Some(SinkTmdsConfig::new(false, false)));
+        let gated = TmdsPolicy::DEFAULT.with_tmds_config_gate(TmdsConfigGate::ScramblingSink);
+        let plain = TmdsLinkParams::choose(148_500, sink, CAN, gated).unwrap();
+        assert_eq!(plain.sink_config(), None);
+        // A sink that supports scrambling is written under either gate.
+        let supported = TmdsLinkParams::choose(148_500, ALL, CAN, gated).unwrap();
+        assert!(supported.sink_config().is_some());
+        assert_eq!(TmdsConfigGate::default(), TmdsConfigGate::AnyScdcSink);
     }
 
     #[test]

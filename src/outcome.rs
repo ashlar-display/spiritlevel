@@ -289,7 +289,9 @@ pub enum ReconnectCheck<S> {
     },
     /// The read failed; nothing was decided.
     Unreadable(S),
-    /// The sink has no SCDC: there is nothing to check.
+    /// No `TMDS_Config` write is due on this link ([`TmdsLinkParams::sink_config`] is
+    /// `None`: a sink without SCDC, or a plain link the policy's gate leaves unwritten), so
+    /// there is nothing to check.
     NotApplicable,
     /// The sink's current facts differ from those the link was chosen with: nothing was
     /// read, as the link no longer fits the sink.

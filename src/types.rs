@@ -158,7 +158,7 @@ impl From<&hdmi_hal::phy::TmdsPhyCapabilities> for SourceTmdsFacts {
 /// The caller's choices where HDMI sources differ.
 ///
 /// [`DEFAULT`](Self::DEFAULT) (also [`Default`]): low-rate scrambling permitted, threshold
-/// [`ScramblingThreshold::Above340`].
+/// [`ScramblingThreshold::Above340`], `TMDS_Config` written to any sink with SCDC.
 #[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct TmdsPolicy {
@@ -166,6 +166,23 @@ pub struct TmdsPolicy {
     pub low_rate_scrambling: bool,
     /// Which rate first requires scrambling and 1/40.
     pub threshold: ScramblingThreshold,
+    /// Which sinks get the `TMDS_Config` write on a plain link.
+    pub tmds_config_gate: TmdsConfigGate,
+}
+
+/// Which sinks get the `TMDS_Config` write on a plain link. A scrambled link always writes
+/// it: the sink must be told.
+///
+/// The two differ only for a sink with SCDC that does not support scrambling, which never
+/// runs at 1/40.
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+pub enum TmdsConfigGate {
+    /// Any sink with SCDC (the default, chosen).
+    #[default]
+    AnyScdcSink,
+    /// Only a sink that supports scrambling.
+    ScramblingSink,
 }
 
 impl TmdsPolicy {
@@ -173,6 +190,7 @@ impl TmdsPolicy {
     pub const DEFAULT: Self = Self {
         low_rate_scrambling: true,
         threshold: ScramblingThreshold::Above340,
+        tmds_config_gate: TmdsConfigGate::AnyScdcSink,
     };
 
     /// This policy with low-rate scrambling permitted or not.
@@ -188,6 +206,15 @@ impl TmdsPolicy {
     #[must_use]
     pub const fn with_threshold(self, threshold: ScramblingThreshold) -> Self {
         Self { threshold, ..self }
+    }
+
+    /// This policy with the given `TMDS_Config` gate.
+    #[must_use]
+    pub const fn with_tmds_config_gate(self, tmds_config_gate: TmdsConfigGate) -> Self {
+        Self {
+            tmds_config_gate,
+            ..self
+        }
     }
 }
 
