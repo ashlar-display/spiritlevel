@@ -89,8 +89,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   gathered), `BringUpError` (`Scdc` or `Phy`,
   with the step, the output's state, the `Cleanup` and the warnings gathered), the six
   `BringUpWarning` kinds in fixed `Warnings` storage, `ScramblingCheck` with `CheckResult`
-  and `FailedRead`, `OutputState` and `WriteStage`. `TmdsStep` gains the bring-up steps, so
-  an error and its event name a step alike.
+  and `FailedRead`, and `OutputState`. `TmdsStep` gains the bring-up steps, so an error and
+  its event name a step alike; the read of a read-modify-write is `ReadTmdsConfig`, its
+  write `WriteTmdsConfig`. A failed read-and-write is an `UpdateError` in every value,
+  which is exhaustive and a `DdcError` with the failed half's kind.
 - **`SinkTmdsFacts::frl_capable`**: the sink declares FRL, from a non-zero `Max_FRL_Rate`
   in the `From` impls, with `with_frl_capable`. `new` sets it for a sink with SCDC, so a
   caller that never learns of it still gets the FRL clear before a bring-up; `NONE` and a

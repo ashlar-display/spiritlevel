@@ -12,13 +12,14 @@ use crate::config::{
     BringUpConfig, ClearFrl, OnTmdsConfigFailure, OutputDuringSinkWrite, SinkPresence,
     SourceVersionWrite, TmdsConfigWrite,
 };
+use crate::error::UpdateError;
 use crate::event::{
     CancelPoint, FrlClearSkip, SourceVersionSkip, TmdsConfigSkip, TmdsEvent, TmdsEventKind,
     TmdsStep,
 };
 use crate::outcome::{
     BringUpError, BringUpOutcome, BringUpWarning, CheckResult, Cleanup, LinkUp, OutputState,
-    ScramblingCheck, Warnings, WriteStage,
+    ScramblingCheck, Warnings,
 };
 use crate::params::TmdsLinkParams;
 
@@ -39,12 +40,12 @@ pub(crate) fn transient(kind: DdcErrorKind) -> bool {
 }
 
 /// A failed SCDC step before both paths: a warning, whatever the error's kind.
-fn failed<Io: TmdsIo>(
+fn failed<Io: TmdsIo, E: DdcError>(
     io: &Io,
     emit: &mut impl FnMut(&Io, TmdsEventKind),
     step: TmdsStep,
-    error: Io::ScdcError,
-    warning: impl FnOnce(Io::ScdcError) -> BringUpWarning<Io::ScdcError>,
+    error: E,
+    warning: impl FnOnce(E) -> BringUpWarning<Io::ScdcError>,
     warnings: &mut Warnings<Io::ScdcError>,
 ) {
     let kind = error.kind();
@@ -137,7 +138,7 @@ pub(crate) async fn before_both_paths<Io: TmdsIo>(
                     io,
                     emit,
                     TmdsStep::ClearFltUpdate,
-                    e.into_inner(),
+                    e,
                     BringUpWarning::FltUpdateClearFailed,
                     warnings,
                 ),
@@ -271,14 +272,11 @@ async fn write_sink<Io: TmdsIo, F: FnMut(TmdsEvent)>(
         TmdsConfigWrite::WholeByte => io
             .write_tmds_config(value)
             .await
-            .map_err(|e| (WriteStage::Write, e)),
-        _ => io.update_tmds_config(value).await.map_err(|e| match e {
-            crate::error::UpdateError::Read(e) => (WriteStage::Read, e),
-            crate::error::UpdateError::Write(e) => (WriteStage::Write, e),
-        }),
+            .map_err(UpdateError::Write),
+        _ => io.update_tmds_config(value).await,
     };
     let written_at = io.now();
-    let (stage, error) = match result {
+    let error = match result {
         Ok(()) => {
             emit(
                 io,
@@ -289,7 +287,11 @@ async fn write_sink<Io: TmdsIo, F: FnMut(TmdsEvent)>(
         }
         Err(failure) => failure,
     };
-    let step = TmdsStep::WriteTmdsConfig;
+    // The step names the half: a read-modify-write whose read failed wrote nothing.
+    let step = match error {
+        UpdateError::Read(_) => TmdsStep::ReadTmdsConfig,
+        UpdateError::Write(_) => TmdsStep::WriteTmdsConfig,
+    };
     let kind = error.kind();
     let ends = !transient(kind) || config.on_tmds_config_failure == OnTmdsConfigFailure::Stop;
     emit(
@@ -298,7 +300,11 @@ async fn write_sink<Io: TmdsIo, F: FnMut(TmdsEvent)>(
         TmdsEventKind::ScdcStepFailed { step, kind, ends },
     );
     if ends {
-        return Err(Stop { step, error }.into());
+        return Err(Stop {
+            step,
+            error: error.into_inner(),
+        }
+        .into());
     }
     // A plain link has no scrambling check: read the register back so a sink that kept
     // 1/40 after a failed clear does not go unnoticed.
@@ -308,7 +314,6 @@ async fn write_sink<Io: TmdsIo, F: FnMut(TmdsEvent)>(
         if io.cancelled() {
             warnings.push(BringUpWarning::TmdsConfigWriteFailed {
                 error,
-                stage,
                 read_back: None,
             });
             return Err(CancelPoint::Step(TmdsStep::ReadTmdsConfig).into());
@@ -332,11 +337,7 @@ async fn write_sink<Io: TmdsIo, F: FnMut(TmdsEvent)>(
         }
         Some(read)
     };
-    warnings.push(BringUpWarning::TmdsConfigWriteFailed {
-        error,
-        stage,
-        read_back,
-    });
+    warnings.push(BringUpWarning::TmdsConfigWriteFailed { error, read_back });
     Ok(Some(written_at))
 }
 
@@ -916,7 +917,7 @@ mod tests {
             w,
             [
                 BringUpWarning::FrlRateClearFailed(DdcErrorKind::Busy),
-                BringUpWarning::FltUpdateClearFailed(DdcErrorKind::Busy),
+                BringUpWarning::FltUpdateClearFailed(UpdateError::Read(DdcErrorKind::Busy)),
                 BringUpWarning::SourceVersionWriteFailed(DdcErrorKind::Busy),
             ]
         );
@@ -1251,10 +1252,15 @@ mod tests {
         assert!(matches!(
             r.link_up().unwrap().warnings.iter().next(),
             Some(BringUpWarning::TmdsConfigWriteFailed {
-                stage: WriteStage::Write,
+                error: UpdateError::Write(DdcErrorKind::Busy),
                 ..
             })
         ));
+        assert!(r.has(TmdsEventKind::ScdcStepFailed {
+            step: TmdsStep::WriteTmdsConfig,
+            kind: DdcErrorKind::Busy,
+            ends: false
+        }));
     }
 
     #[test]
@@ -1293,11 +1299,16 @@ mod tests {
         assert_eq!(
             r.link_up().unwrap().warnings.iter().next(),
             Some(&BringUpWarning::TmdsConfigWriteFailed {
-                error: DdcErrorKind::Busy,
-                stage: WriteStage::Read,
+                error: UpdateError::Read(DdcErrorKind::Busy),
                 read_back: None
             })
         );
+        // The read half failed, and the event says so by its step.
+        assert!(r.has(TmdsEventKind::ScdcStepFailed {
+            step: TmdsStep::ReadTmdsConfig,
+            kind: DdcErrorKind::Busy,
+            ends: false
+        }));
         // It carried on to the output and the check.
         assert_eq!(
             io.ops()[io.ops().len() - 2..],
@@ -1318,9 +1329,8 @@ mod tests {
         assert!(matches!(
             read_back,
             Some(BringUpWarning::TmdsConfigWriteFailed {
-                stage: WriteStage::Write,
+                error: UpdateError::Write(DdcErrorKind::Busy),
                 read_back: Some(Ok(read)),
-                ..
             }) if read.config == SinkTmdsConfig::new(true, true) && read.raw == 0x03
         ));
     }
@@ -1333,8 +1343,9 @@ mod tests {
         let r = up(&mut io, &link(594_000, NO_FRL), &config);
         assert_eq!(
             r.result,
+            // The read half of the read-modify-write failed: nothing was written.
             Err(BringUpError::Scdc {
-                step: TmdsStep::WriteTmdsConfig,
+                step: TmdsStep::ReadTmdsConfig,
                 error: DdcErrorKind::Busy,
                 output: OutputState::Stopped,
                 cleanup: Cleanup::TornDown(Ok(TornDown {
@@ -1345,9 +1356,21 @@ mod tests {
         );
         assert_eq!(io.ops().last(), Some(&Op::StopOutput));
         assert!(r.has(TmdsEventKind::BringUpEnded {
-            failed_at: Some(TmdsStep::WriteTmdsConfig),
+            failed_at: Some(TmdsStep::ReadTmdsConfig),
             cancelled: false
         }));
+        // The write half names the write.
+        let mut io = TestIo::new();
+        io.fail_scdc = Some(DdcErrorKind::Busy);
+        io.update_fails_at_write = true;
+        let r = up(&mut io, &link(594_000, NO_FRL), &config);
+        assert!(matches!(
+            r.result,
+            Err(BringUpError::Scdc {
+                step: TmdsStep::WriteTmdsConfig,
+                ..
+            })
+        ));
     }
 
     #[test]
@@ -1455,7 +1478,7 @@ mod tests {
         assert!(matches!(
             r.result,
             Err(BringUpError::Scdc {
-                step: TmdsStep::WriteTmdsConfig,
+                step: TmdsStep::ReadTmdsConfig,
                 output: OutputState::Stopped,
                 warnings,
                 ..

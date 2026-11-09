@@ -288,8 +288,9 @@ check from the scrambler.
 the sink followed. Most sources carry on (i915 logs it and enables the port, the others do
 not look at the result) [26]; the DRM helper clears both sink bits and leaves its scrambler
 off, and nouveau returns when its read fails [39]. `Stop` ends the bring-up with an error.
-With read-modify-write, the warning says which half failed: a failed read means nothing was
-written. Carrying on is also what a DRM driver needs, since its enable hooks cannot fail.
+With read-modify-write, the warning (an `UpdateError`) says which half failed, and an error
+or event names it by its step, `ReadTmdsConfig` or `WriteTmdsConfig`: a failed read means
+nothing was written. Carrying on is also what a DRM driver needs, since its enable hooks cannot fail.
 
 ### The scrambling check
 
@@ -641,12 +642,11 @@ pub struct LinkUp<S> {
 #[non_exhaustive]
 pub enum BringUpWarning<S> {
     FrlRateClearFailed(S),
-    FltUpdateClearFailed(S),
+    FltUpdateClearFailed(UpdateError<S>),
     SinkVersionReadFailed(S),
     SourceVersionWriteFailed(S),
     TmdsConfigWriteFailed {
-        error: S,
-        stage: WriteStage,                                   // Read: nothing was written
+        error: UpdateError<S>,                               // Read: nothing was written
         read_back: Option<Result<TmdsConfigReading, S>>,     // a plain link's read-back
     },
     DeadlineMissed { by: Duration },
@@ -668,7 +668,6 @@ pub enum Cleanup<S, P> {
 }
 
 pub enum OutputState { Stopped, MayBeRunning }   // exhaustive
-pub enum WriteStage { Read, Write }              // exhaustive
 
 #[non_exhaustive]
 pub struct ScramblingCheck<S> {
@@ -732,8 +731,8 @@ pub trait TmdsScdc {
     fn clear_flt_update(&mut self) -> Result<bool, UpdateError<Self::Error>>;   // whether it was set
 }
 
-/// An operation of a read and a write, and which failed. `Display`, `core::error::Error`.
-#[non_exhaustive]
+/// An operation of a read and a write, and which failed: exhaustive, as it has two halves.
+/// `Display`, `core::error::Error`, and `DdcError` with the failed half's kind.
 pub enum UpdateError<E> { Read(E), Write(E) }
 
 /// What the sink reports in `Scrambling_Status` (0x21), with the byte read (`raw()`).

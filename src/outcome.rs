@@ -59,8 +59,8 @@ pub struct LinkUp<S> {
 pub enum BringUpWarning<S> {
     /// Clearing `Config_1` failed.
     FrlRateClearFailed(S),
-    /// Clearing `FLT_update` failed.
-    FltUpdateClearFailed(S),
+    /// Clearing `FLT_update` failed, at its read or its write.
+    FltUpdateClearFailed(UpdateError<S>),
     /// Reading `Sink_Version` failed.
     SinkVersionReadFailed(S),
     /// Writing `Source_Version` failed.
@@ -68,11 +68,9 @@ pub enum BringUpWarning<S> {
     /// Writing the sink's `TMDS_Config` failed.
     #[non_exhaustive]
     TmdsConfigWriteFailed {
-        /// The error.
-        error: S,
-        /// Which half of the write failed: the read of a read-modify-write (nothing was
-        /// written) or the write ([`WriteStage::Write`] for a whole-byte write).
-        stage: WriteStage,
+        /// The error, and which half of the write failed: the read of a read-modify-write
+        /// (nothing was written) or the write (always the write for a whole-byte write).
+        error: UpdateError<S>,
         /// On a plain link, the register read back after the failure, or the read's error;
         /// `None` on other links, which the check covers, and when the cancel flag stopped
         /// the bring-up before the read.
@@ -187,15 +185,6 @@ pub enum OutputState {
     Stopped,
     /// May be running: started, or a call that would have started or stopped it failed.
     MayBeRunning,
-}
-
-/// Which half of a `TMDS_Config` write failed. Exhaustive: a write has these two halves.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum WriteStage {
-    /// The read of a read-modify-write: nothing was written.
-    Read,
-    /// The write.
-    Write,
 }
 
 /// What the scrambling check found, and how.

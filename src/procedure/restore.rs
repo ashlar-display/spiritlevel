@@ -64,10 +64,13 @@ pub async fn quick_restore<Io: TmdsIo, F: FnMut(TmdsEvent)>(
         match result {
             Ok(()) => emit(io, TmdsEventKind::TmdsConfigWritten { config: value }),
             Err(error) => {
-                let step = TmdsStep::WriteTmdsConfig;
-                let kind = match &error {
-                    UpdateError::Read(e) | UpdateError::Write(e) => e.kind(),
+                // The step names the half: a read-modify-write whose read failed wrote
+                // nothing.
+                let step = match error {
+                    UpdateError::Read(_) => TmdsStep::ReadTmdsConfig,
+                    UpdateError::Write(_) => TmdsStep::WriteTmdsConfig,
                 };
+                let kind = error.kind();
                 let ends =
                     !transient(kind) || config.on_tmds_config_failure == OnTmdsConfigFailure::Stop;
                 emit(io, TmdsEventKind::ScdcStepFailed { step, kind, ends });
@@ -251,7 +254,7 @@ mod tests {
         assert_eq!(
             last,
             Some(TmdsEventKind::QuickRestoreEnded {
-                failed_at: Some(TmdsStep::WriteTmdsConfig)
+                failed_at: Some(TmdsStep::ReadTmdsConfig)
             })
         );
 

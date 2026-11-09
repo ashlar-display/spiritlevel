@@ -266,9 +266,10 @@ pub enum TmdsStep {
     SinkVersion,
     /// Writing `Source_Version`.
     SourceVersion,
-    /// Writing the sink's `TMDS_Config`.
+    /// Writing the sink's `TMDS_Config`; for a read-modify-write, its write.
     WriteTmdsConfig,
-    /// Reading the sink's `TMDS_Config`.
+    /// Reading the sink's `TMDS_Config`: a read-back, the reconnect check's read, or the
+    /// read of a read-modify-write, after which nothing was written.
     ReadTmdsConfig,
     /// Configuring the PHY's character rate and clock ratio.
     Configure,

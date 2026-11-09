@@ -3,6 +3,8 @@
 
 use core::fmt;
 
+use hdmi_hal::ddc::{DdcError, DdcErrorKind};
+
 /// Why [`TmdsLinkParams::choose`](crate::TmdsLinkParams::choose) refused the inputs.
 #[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -73,7 +75,9 @@ impl core::error::Error for ParamsError {}
 
 /// The error of an SCDC operation made of a read and a write, saying which of them failed:
 /// a read-modify-write of `TMDS_Config`, or the clear of `FLT_update`.
-#[non_exhaustive]
+///
+/// Exhaustive: such an operation is a read and a write, never a third transfer. Its
+/// [`DdcError`] kind is that of the half that failed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum UpdateError<E> {
     /// The read failed; nothing was written.
@@ -87,6 +91,14 @@ impl<E> UpdateError<E> {
     pub fn into_inner(self) -> E {
         match self {
             Self::Read(e) | Self::Write(e) => e,
+        }
+    }
+}
+
+impl<E: DdcError> DdcError for UpdateError<E> {
+    fn kind(&self) -> DdcErrorKind {
+        match self {
+            Self::Read(e) | Self::Write(e) => e.kind(),
         }
     }
 }
@@ -226,6 +238,10 @@ mod tests {
     fn update_error_says_which_transfer_failed() {
         assert_eq!(UpdateError::Read(1).into_inner(), 1);
         assert_eq!(UpdateError::Write(2).into_inner(), 2);
+        assert_eq!(
+            UpdateError::Write(DdcErrorKind::Busy).kind(),
+            DdcErrorKind::Busy
+        );
         assert_eq!(
             text(&render_any(UpdateError::Read(
                 ParamsError::AboveSourceMaximum {

@@ -55,7 +55,7 @@ pub use link::{Cancel, NoCancel, TmdsLink};
 pub use outcome::{
     BringUpError, BringUpOutcome, BringUpWarning, CheckResult, Cleanup, FailedRead, LinkUp,
     OutputState, ReconnectCheck, RestoreError, Restored, ScramblingCheck, SinkClear, TearDownError,
-    TornDown, Warnings, WriteStage,
+    TornDown, Warnings,
 };
 pub use params::{ScramblingDecision, ScramblingOff, TmdsLinkParams};
 pub use scdc::TmdsScdc;
