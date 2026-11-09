@@ -95,6 +95,38 @@ pub enum TmdsEventKind {
         /// steps anyway, as tear-down does.
         ends: bool,
     },
+    /// The sink's `Config_1` (the FRL rate) was cleared before a bring-up.
+    FrlRateCleared,
+    /// The sink's `FLT_update` was cleared before a bring-up.
+    #[non_exhaustive]
+    FltUpdateCleared {
+        /// Whether it was set.
+        was_set: bool,
+    },
+    /// The FRL clear before a bring-up was skipped, and why.
+    #[non_exhaustive]
+    FrlClearSkipped {
+        /// The rule that skipped it.
+        reason: FrlClearSkip,
+    },
+    /// The sink's `Sink_Version` was read.
+    #[non_exhaustive]
+    SinkVersionRead {
+        /// The value.
+        version: u8,
+    },
+    /// `Source_Version` was written.
+    #[non_exhaustive]
+    SourceVersionWritten {
+        /// The value.
+        version: u8,
+    },
+    /// `Source_Version` was not written, and why.
+    #[non_exhaustive]
+    SourceVersionSkipped {
+        /// The rule that skipped it.
+        reason: SourceVersionSkip,
+    },
     /// A reconnect check started.
     #[non_exhaustive]
     ReconnectCheckStarted {
@@ -151,6 +183,37 @@ pub enum TmdsStep {
     StartOutput,
     /// Stopping the output.
     StopOutput,
+}
+
+/// Why the FRL clear before a bring-up was skipped.
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum FrlClearSkip {
+    /// The sink has no SCDC.
+    NoScdc,
+    /// The sink declares no FRL, and the setting clears only one that does.
+    SinkDeclaresNoFrl,
+}
+
+/// Why `Source_Version` was not written.
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum SourceVersionSkip {
+    /// The sink has no SCDC.
+    NoScdc,
+    /// The setting never writes it.
+    Never,
+    /// The setting writes it only on a scrambled link, and this one is not.
+    NotScrambled,
+    /// The sink's `Sink_Version` rules the write out under the setting: not 1 for
+    /// `IfSinkVersion1`, 0 for `WhenScrambling`.
+    #[non_exhaustive]
+    SinkVersion {
+        /// The value read.
+        version: u8,
+    },
+    /// The `Sink_Version` read the setting needs failed, so nothing was written.
+    SinkVersionUnread,
 }
 
 /// Why a tear-down did not clear the sink's `TMDS_Config`.

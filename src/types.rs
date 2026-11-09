@@ -41,11 +41,14 @@ pub struct SinkTmdsFacts {
     /// The sink declares scrambling at or below 340 Mcsc (`LTE_340Mcsc_scramble`). It
     /// counts only with SCDC and [`scrambling_supported`](Self::scrambling_supported).
     pub lte_340mcsc_scramble: bool,
+    /// The sink declares FRL (a non-zero `Max_FRL_Rate`), so its `Config_1` may hold FRL
+    /// settings a bring-up clears first.
+    pub frl_capable: bool,
 }
 
 impl SinkTmdsFacts {
     /// A sink without HDMI Forum capabilities: no SCDC and no scrambling.
-    pub const NONE: Self = Self::new(false, false, false);
+    pub const NONE: Self = Self::new(false, false, false).with_frl_capable(false);
 
     /// Facts stated by the caller.
     #[must_use]
@@ -58,20 +61,32 @@ impl SinkTmdsFacts {
             scdc_present,
             scrambling_supported,
             lte_340mcsc_scramble,
+            frl_capable: true,
         }
+    }
+
+    /// Sets whether the sink declares FRL. [`new`](Self::new) takes it to, so a caller that
+    /// never learns of this fact still gets the FRL clear before a bring-up: on a sink
+    /// without FRL, a write to a register it does not use, where `false` would skip the
+    /// clear silently.
+    #[must_use]
+    pub const fn with_frl_capable(mut self, frl_capable: bool) -> Self {
+        self.frl_capable = frl_capable;
+        self
     }
 }
 
 #[cfg(feature = "display-types")]
 impl From<&display_types::cea861::HdmiForumSinkCap> for SinkTmdsFacts {
     /// `scrambling_supported` is `scdc_present` and a non-zero `max_tmds_rate_mhz`;
-    /// the other two facts are copied.
+    /// `frl_capable` is a non-zero `max_frl_rate`; the other two facts are copied.
     fn from(cap: &display_types::cea861::HdmiForumSinkCap) -> Self {
         Self::new(
             cap.scdc_present,
             cap.scdc_present && cap.max_tmds_rate_mhz != 0,
             cap.lte_340mcsc_scramble,
         )
+        .with_frl_capable(cap.max_frl_rate != display_types::cea861::HdmiForumFrl::NotSupported)
     }
 }
 
@@ -278,7 +293,13 @@ mod tests {
 
     #[test]
     fn sink_facts_none_is_all_clear() {
-        assert_eq!(SinkTmdsFacts::NONE, SinkTmdsFacts::new(false, false, false));
+        assert_eq!(
+            SinkTmdsFacts::NONE,
+            SinkTmdsFacts::new(false, false, false).with_frl_capable(false)
+        );
+        const { assert!(!SinkTmdsFacts::NONE.frl_capable) };
+        // `new` takes the sink to declare FRL, so the FRL clear is not skipped silently.
+        assert!(SinkTmdsFacts::new(true, true, true).frl_capable);
     }
 
     #[test]
@@ -367,32 +388,18 @@ mod tests {
 
         /// A block with the three fields under test set and every other field clear.
         fn cap(scdc: bool, max_mhz: u16, lte: bool) -> HdmiForumSinkCap {
+            cap_with_frl(scdc, max_mhz, lte, HdmiForumFrl::NotSupported)
+        }
+
+        fn cap_with_frl(
+            scdc: bool,
+            max_mhz: u16,
+            lte: bool,
+            frl: HdmiForumFrl,
+        ) -> HdmiForumSinkCap {
             HdmiForumSinkCap::new(
-                1,
-                max_mhz,
-                scdc,
-                false,
-                false,
-                false,
-                lte,
-                false,
-                false,
-                false,
-                HdmiForumFrl::NotSupported,
-                false,
-                false,
-                false,
-                false,
-                false,
-                false,
-                false,
-                false,
-                false,
-                false,
-                false,
-                None,
-                None,
-                None,
+                1, max_mhz, scdc, false, false, false, lte, false, false, false, frl, false, false,
+                false, false, false, false, false, false, false, false, false, None, None, None,
             )
         }
 
@@ -413,7 +420,7 @@ mod tests {
             for ((scdc, max_mhz, lte), (f_scdc, f_supported, f_lte)) in table {
                 assert_eq!(
                     SinkTmdsFacts::from(&cap(scdc, max_mhz, lte)),
-                    SinkTmdsFacts::new(f_scdc, f_supported, f_lte),
+                    SinkTmdsFacts::new(f_scdc, f_supported, f_lte).with_frl_capable(false),
                     "{scdc} {max_mhz} {lte}"
                 );
             }
@@ -425,8 +432,15 @@ mod tests {
             let c = cap(true, 600, true);
             assert_eq!(
                 SinkTmdsFacts::from(Some(&c)),
-                SinkTmdsFacts::new(true, true, true)
+                SinkTmdsFacts::new(true, true, true).with_frl_capable(false)
             );
+        }
+
+        #[test]
+        fn frl_capable_follows_max_frl_rate() {
+            let frl = cap_with_frl(true, 600, false, HdmiForumFrl::Rate6Gbps4Lanes);
+            assert!(SinkTmdsFacts::from(&frl).frl_capable);
+            assert!(!SinkTmdsFacts::from(&cap(true, 600, false)).frl_capable);
         }
     }
 }

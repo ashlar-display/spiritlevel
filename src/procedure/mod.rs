@@ -6,6 +6,7 @@
 //! I/O completes at once polls it to completion without a runtime, an async driver awaits
 //! it. A test drives the core through one double.
 
+mod bring_up;
 mod reconnect;
 mod tear_down;
 

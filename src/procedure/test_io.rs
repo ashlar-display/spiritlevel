@@ -50,8 +50,10 @@ pub struct TestIo {
     log: [Op; LOG_LEN],
     len: usize,
     clock: Cell<u64>,
-    /// Every SCDC call fails with this kind.
+    /// SCDC calls fail with this kind, once `scdc_ok_calls` of them have succeeded.
     pub fail_scdc: Option<DdcErrorKind>,
+    pub scdc_ok_calls: usize,
+    scdc_calls: usize,
     pub fail_set_scrambling: bool,
     pub fail_stop_output: bool,
     pub fail_configure: bool,
@@ -71,6 +73,8 @@ impl TestIo {
             len: 0,
             clock: Cell::new(0),
             fail_scdc: None,
+            scdc_ok_calls: 0,
+            scdc_calls: 0,
             fail_set_scrambling: false,
             fail_stop_output: false,
             fail_configure: false,
@@ -95,7 +99,11 @@ impl TestIo {
 
     fn scdc(&mut self, op: Op) -> Result<(), DdcErrorKind> {
         self.push(op);
-        self.fail_scdc.map_or(Ok(()), Err)
+        self.scdc_calls += 1;
+        match self.fail_scdc {
+            Some(kind) if self.scdc_calls > self.scdc_ok_calls => Err(kind),
+            _ => Ok(()),
+        }
     }
 
     fn phy(&mut self, op: Op, fail: bool) -> Result<(), ()> {

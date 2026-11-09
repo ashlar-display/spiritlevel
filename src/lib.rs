@@ -41,8 +41,8 @@ pub use config::{
 };
 pub use error::{ParamsError, UpdateError};
 pub use event::{
-    MAX_RECONNECT_CHECK_EVENTS, MAX_TEAR_DOWN_EVENTS, SinkClearSkip, TmdsEvent, TmdsEventKind,
-    TmdsStep,
+    FrlClearSkip, MAX_RECONNECT_CHECK_EVENTS, MAX_TEAR_DOWN_EVENTS, SinkClearSkip,
+    SourceVersionSkip, TmdsEvent, TmdsEventKind, TmdsStep,
 };
 pub use link::{Cancel, NoCancel, TmdsLink};
 pub use outcome::{
