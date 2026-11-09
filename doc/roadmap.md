@@ -4,7 +4,6 @@ What each release contains is in the [changelog](../CHANGELOG.md); this page is 
 what comes next. Today `spiritlevel` is the decision a TMDS bring-up starts from
 (`TmdsLinkParams::choose`) and the procedures that carry it out: bring-up, tear-down, the
 reconnect check and the quick restore, over hdmi-hal's TMDS PHY, clock and delay traits.
-They are released after the hdmi-hal release that adds those traits.
 
 ## Planned
 

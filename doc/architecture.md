@@ -71,15 +71,17 @@ It does not cover:
 
 ## Dependencies and features
 
+The features and the dependencies, with their versions in `Cargo.toml`:
+
 ```toml
 [features]
 default = ["display-types"]
 culvert = ["dep:culvert"]
 
 [dependencies]
-display-types = { version = "0.5", default-features = false, optional = true }
-hdmi-hal = { version = "0.6", default-features = false }
-culvert = { version = "0.3", default-features = false, optional = true }
+display-types = { default-features = false, optional = true }
+hdmi-hal = { default-features = false }
+culvert = { default-features = false, optional = true }
 ```
 
 Dependencies point only down the stack: nothing below `spiritlevel` depends on it.
@@ -820,7 +822,7 @@ each event into its own. There is no logging.
 #[non_exhaustive]
 pub struct TmdsEvent {
     pub at: Timestamp,          // from the procedure's own clock
-    pub kind: TmdsEventKind,    // #[non_exhaustive], and each variant too
+    pub kind: TmdsEventKind,    // #[non_exhaustive], as is each variant with fields
 }
 ```
 
@@ -837,8 +839,11 @@ pub struct TmdsEvent {
 - **No error values,** only their kinds: the values stay in the outcome or the error, which
   own them, so neither error type has to be `Clone`, and `TmdsEvent` is `Copy` with no type
   parameters, so an embedded caller can send it through a channel.
-- **Events explain outcomes:** every warning is also an event, and nothing in an outcome is
-  missing from the events, so a tool that only listens can explain every result.
+- **Events explain outcomes:** every warning and every error is also an event, with its
+  step, so a tool that only listens can explain every result. A failed read-modify-write of
+  `TMDS_Config` names its half by its step (`ReadTmdsConfig` or `WriteTmdsConfig`); which
+  half of the `FLT_update` clear failed is only in the warning's value, as are the error
+  values themselves.
 
 **A fixed maximum per procedure,** since every step records at most one event per call and
 the check one per window: `MAX_BRING_UP_EVENTS` (which includes the tear-down after an error

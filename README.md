@@ -73,9 +73,12 @@ fn main() -> Result<(), ParamsError> {
 ```
 
 Where HDMI sources differ, `TmdsPolicy` holds the setting: whether to scramble at or
-below 340 Mcsc when both ends can (default on), and whether exactly 340 000 kHz counts as
-above the threshold (default not). A rate above 340 000 kHz on a sink that cannot take
-scrambling is refused with `ParamsError::ScramblingUnsupported`, naming every missing fact.
+below 340 Mcsc when both ends can (default on), whether exactly 340 000 kHz counts as
+above the threshold (default not), and which sinks with SCDC get the `TMDS_Config` write
+on a plain link (default all). A rate above 340 000 kHz on a sink that cannot take
+scrambling, or from a source without a scrambler, is refused with
+`ParamsError::ScramblingUnsupported`, naming every missing fact; a rate above the source's
+own maximum with `ParamsError::AboveSourceMaximum`.
 
 Then bring the link up over the parts: the sink's SCDC (`TmdsScdc`, implemented for
 culvert's client by the `culvert` feature), a `TmdsPhy`, a `Clock` and a `Delay`:
