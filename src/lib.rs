@@ -45,7 +45,11 @@ pub use event::{
     TmdsStep,
 };
 pub use link::{Cancel, NoCancel, TmdsLink};
-pub use outcome::{ReconnectCheck, SinkClear, TearDownError, TornDown};
+pub use outcome::{
+    BringUpError, BringUpOutcome, BringUpWarning, CheckResult, Cleanup, FailedRead, LinkUp,
+    OutputState, ReconnectCheck, ScramblingCheck, SinkClear, TearDownError, TornDown, Warnings,
+    WriteStage,
+};
 pub use params::{ScramblingDecision, ScramblingOff, TmdsLinkParams};
 pub use scdc::TmdsScdc;
 

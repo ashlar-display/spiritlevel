@@ -131,12 +131,24 @@ pub enum TmdsEventKind {
 #[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum TmdsStep {
+    /// Clearing the sink's `Config_1` (the FRL rate) before a bring-up.
+    ClearFrlRate,
+    /// Clearing the sink's `FLT_update` before a bring-up.
+    ClearFltUpdate,
+    /// Reading the sink's `Sink_Version`.
+    SinkVersion,
+    /// Writing `Source_Version`.
+    SourceVersion,
     /// Writing the sink's `TMDS_Config`.
     WriteTmdsConfig,
     /// Reading the sink's `TMDS_Config`.
     ReadTmdsConfig,
+    /// Configuring the PHY's character rate and clock ratio.
+    Configure,
     /// Turning the source's scrambler on or off.
     SetScrambling,
+    /// Starting the output.
+    StartOutput,
     /// Stopping the output.
     StopOutput,
 }

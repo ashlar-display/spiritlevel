@@ -79,6 +79,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   differ from those the link was chosen with, and nothing is read. It writes nothing.
   `TmdsLinkParams::sink()` gives the sink facts a link was chosen from, and
   `MAX_RECONNECT_CHECK_EVENTS` the check's bound.
+- **Bring-up's result types**, ahead of the procedure: `BringUpOutcome` (`Up` with a
+  `LinkUp`, or `Cancelled` with the tear-down's result), `BringUpError` (`Scdc` or `Phy`,
+  with the step, the output's state, the `Cleanup` and the warnings gathered), the six
+  `BringUpWarning` kinds in fixed `Warnings` storage, `ScramblingCheck` with `CheckResult`
+  and `FailedRead`, `OutputState` and `WriteStage`. `TmdsStep` gains the bring-up steps, so
+  an error and its event name a step alike.
 
 ### Changed
 
