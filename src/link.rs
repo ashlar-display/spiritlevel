@@ -13,7 +13,9 @@ use hdmi_hal::time::{Clock, Delay, Timestamp};
 use crate::config::{BringUpConfig, SinkPresence, TearDownConfig};
 use crate::error::UpdateError;
 use crate::event::TmdsEvent;
-use crate::outcome::{BringUpError, BringUpOutcome, ReconnectCheck, TearDownError, TornDown};
+use crate::outcome::{
+    BringUpError, BringUpOutcome, ReconnectCheck, RestoreError, Restored, TearDownError, TornDown,
+};
 use crate::params::TmdsLinkParams;
 use crate::procedure::{self, TmdsIo};
 use crate::scdc::TmdsScdc;
@@ -54,6 +56,12 @@ type TearDownResult<S, P> = Result<
 type BringUpResult<S, P> = Result<
     BringUpOutcome<<S as TmdsScdc>::Error, <P as TmdsPhy>::Error>,
     BringUpError<<S as TmdsScdc>::Error, <P as TmdsPhy>::Error>,
+>;
+
+/// What a quick restore returns, over the parts' error types.
+type RestoreResult<S, P> = Result<
+    Restored<<S as TmdsScdc>::Error>,
+    RestoreError<<S as TmdsScdc>::Error, <P as TmdsPhy>::Error>,
 >;
 
 /// The TMDS procedures over sync parts: the sink's SCDC, the PHY, a clock and a delay, and a
@@ -195,6 +203,40 @@ impl<S: TmdsScdc, P: TmdsPhy, K: Clock, D: Delay, X: Cancel> TmdsLink<S, P, K, D
             &mut SyncIo(self),
             link,
             current_sink,
+            record,
+        ))
+    }
+
+    /// Restores the sink's `TMDS_Config` on the running link; see
+    /// [`procedure::quick_restore`].
+    ///
+    /// # Errors
+    ///
+    /// [`RestoreError`] when the sink's write or the scrambler call failed in a way that
+    /// stops it.
+    pub fn quick_restore(
+        &mut self,
+        link: &TmdsLinkParams,
+        config: &BringUpConfig,
+    ) -> RestoreResult<S, P> {
+        self.quick_restore_with_events(link, config, &mut |_| {})
+    }
+
+    /// [`quick_restore`](Self::quick_restore), calling `record` with each event.
+    ///
+    /// # Errors
+    ///
+    /// As [`quick_restore`](Self::quick_restore).
+    pub fn quick_restore_with_events(
+        &mut self,
+        link: &TmdsLinkParams,
+        config: &BringUpConfig,
+        record: &mut impl FnMut(TmdsEvent),
+    ) -> RestoreResult<S, P> {
+        block_on(procedure::quick_restore(
+            &mut SyncIo(self),
+            link,
+            config,
             record,
         ))
     }
@@ -495,6 +537,27 @@ mod tests {
             link.check_reconnect_with_events(&params, SinkTmdsFacts::NONE, &mut |_| events += 1);
         assert_eq!(result, ReconnectCheck::SinkChanged);
         assert_eq!(events, 2);
+    }
+
+    #[test]
+    fn quick_restore_runs_over_the_parts() {
+        let time = SimTime::default();
+        let mut link = TmdsLink::new(Sink::default(), Phy::default(), &time, &time);
+        let restored = link
+            .quick_restore(&scrambled(), &BringUpConfig::DEFAULT)
+            .unwrap();
+        assert_eq!(restored.check.result, crate::CheckResult::Set);
+        let mut events = 0;
+        assert!(
+            link.quick_restore_with_events(&scrambled(), &BringUpConfig::DEFAULT, &mut |_| {
+                events += 1;
+            })
+            .is_ok()
+        );
+        assert_eq!(events, crate::MAX_QUICK_RESTORE_EVENTS);
+        let (sink, phy, ..) = link.into_parts();
+        assert_eq!(sink.tmds_config, 0x03);
+        assert!(phy.scrambling);
     }
 
     #[test]

@@ -1,6 +1,7 @@
 //! What the procedures return: for bring-up, [`BringUpOutcome`] or [`BringUpError`]; for
 //! tear-down, [`TornDown`] or [`TearDownError`], with [`SinkClear`] saying what became of the
-//! sink; for the reconnect check, [`ReconnectCheck`].
+//! sink; for the reconnect check, [`ReconnectCheck`]; for the quick restore, [`Restored`] or
+//! [`RestoreError`].
 //!
 //! `S` is the SCDC error ([`TmdsScdc::Error`](crate::TmdsScdc::Error)), `P` the PHY error.
 
@@ -9,6 +10,7 @@ use core::time::Duration;
 use hdmi_hal::ddc::{DdcError, DdcErrorKind};
 use hdmi_hal::time::Timestamp;
 
+use crate::error::UpdateError;
 use crate::event::{CancelPoint, TmdsStep};
 use crate::params::TmdsLinkParams;
 use crate::types::SinkTmdsConfig;
@@ -337,6 +339,42 @@ impl<S: DdcError> ReconnectCheck<S> {
             Self::SinkChanged => ReconnectCheck::SinkChanged,
         }
     }
+}
+
+/// A quick restore that ran to its end.
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Restored<S> {
+    /// When the sink's `TMDS_Config` was written, the write failed or not; `None` when no
+    /// write was due.
+    pub sink_written_at: Option<Timestamp>,
+    /// The scrambling check; [`CheckResult::NotApplicable`] on a plain link, and
+    /// [`CheckResult::Cancelled`] when the cancel flag stopped it, with the link left
+    /// running.
+    pub check: ScramblingCheck<S>,
+    /// The write failed and the restore carried on
+    /// ([`OnTmdsConfigFailure::CarryOn`](crate::OnTmdsConfigFailure::CarryOn)): its error,
+    /// with the half of a read-modify-write that failed.
+    pub write_failed: Option<UpdateError<S>>,
+}
+
+/// A quick restore that stopped. Nothing is torn down: the link was running.
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RestoreError<S, P> {
+    /// The sink's write failed with a non-transient error, or at all under
+    /// [`OnTmdsConfigFailure::Stop`](crate::OnTmdsConfigFailure::Stop); nothing followed.
+    Scdc(UpdateError<S>),
+    /// Setting the source's scrambler failed after the sink's write; its state is unknown.
+    #[non_exhaustive]
+    Phy {
+        /// The error.
+        error: P,
+        /// When the sink's `TMDS_Config` was written; `None` when no write was due.
+        sink_written_at: Option<Timestamp>,
+        /// The write's failure, when it failed and the restore carried on.
+        write_failed: Option<UpdateError<S>>,
+    },
 }
 
 /// A tear-down in which every PHY step succeeded: the output is stopped.

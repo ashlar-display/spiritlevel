@@ -9,10 +9,12 @@
 mod bring_up;
 mod check;
 mod reconnect;
+mod restore;
 mod tear_down;
 
 pub use bring_up::bring_up;
 pub use reconnect::check_reconnect;
+pub use restore::quick_restore;
 pub use tear_down::tear_down;
 
 use core::time::Duration;

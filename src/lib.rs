@@ -41,15 +41,15 @@ pub use config::{
 };
 pub use error::{ParamsError, UpdateError};
 pub use event::{
-    CancelPoint, FrlClearSkip, MAX_BRING_UP_EVENTS, MAX_RECONNECT_CHECK_EVENTS,
-    MAX_TEAR_DOWN_EVENTS, SinkClearSkip, SourceVersionSkip, TmdsConfigSkip, TmdsEvent,
-    TmdsEventKind, TmdsStep,
+    CancelPoint, FrlClearSkip, MAX_BRING_UP_EVENTS, MAX_QUICK_RESTORE_EVENTS,
+    MAX_RECONNECT_CHECK_EVENTS, MAX_TEAR_DOWN_EVENTS, SinkClearSkip, SourceVersionSkip,
+    TmdsConfigSkip, TmdsEvent, TmdsEventKind, TmdsStep,
 };
 pub use link::{Cancel, NoCancel, TmdsLink};
 pub use outcome::{
     BringUpError, BringUpOutcome, BringUpWarning, CheckResult, Cleanup, FailedRead, LinkUp,
-    OutputState, ReconnectCheck, ScramblingCheck, SinkClear, TearDownError, TornDown, Warnings,
-    WriteStage,
+    OutputState, ReconnectCheck, RestoreError, Restored, ScramblingCheck, SinkClear, TearDownError,
+    TornDown, Warnings, WriteStage,
 };
 pub use params::{ScramblingDecision, ScramblingOff, TmdsLinkParams};
 pub use scdc::TmdsScdc;

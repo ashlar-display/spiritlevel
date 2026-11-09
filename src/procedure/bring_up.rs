@@ -34,7 +34,7 @@ pub(crate) struct Stop<S> {
 
 /// Whether an error may pass: everything but a bus that is gone (`Detached`) or a request
 /// that cannot be done (`Unsupported`). A kind added later counts as transient.
-fn transient(kind: DdcErrorKind) -> bool {
+pub(crate) fn transient(kind: DdcErrorKind) -> bool {
     !matches!(kind, DdcErrorKind::Detached | DdcErrorKind::Unsupported)
 }
 

@@ -37,6 +37,10 @@ pub const MAX_TEAR_DOWN_EVENTS: usize = 5;
 /// its end.
 pub const MAX_RECONNECT_CHECK_EVENTS: usize = 3;
 
+/// The most events one quick restore records: its start, one each for the sink's write,
+/// the scrambler and the scrambling check, and its end.
+pub const MAX_QUICK_RESTORE_EVENTS: usize = 5;
+
 /// One step or decision of a procedure, stamped by the procedure from its own clock.
 #[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -225,6 +229,18 @@ pub enum TmdsEventKind {
     ReconnectChecked {
         /// What it found, with an error's kind in place of the error.
         result: ReconnectCheck<DdcErrorKind>,
+    },
+    /// A quick restore started.
+    #[non_exhaustive]
+    QuickRestoreStarted {
+        /// The running link whose sink configuration it restores.
+        link: TmdsLinkParams,
+    },
+    /// A quick restore ended.
+    #[non_exhaustive]
+    QuickRestoreEnded {
+        /// The step that stopped it; `None` when it ran to its end.
+        failed_at: Option<TmdsStep>,
     },
     /// A tear-down ended: what became of each part, without the error values.
     #[non_exhaustive]
