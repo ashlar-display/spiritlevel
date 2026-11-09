@@ -249,7 +249,8 @@ fn phy_failed<Io: TmdsIo, F: FnMut(TmdsEvent)>(
 }
 
 /// Writes the sink's `TMDS_Config` when a write is due: the time of the write (`None` when
-/// none was due), or the stop. A transient failure under `CarryOn` is a warning; on a plain
+/// none was due, or when the read of a read-modify-write failed, so nothing was written),
+/// or the stop. A transient failure under `CarryOn` is a warning; on a plain
 /// link it reads the register back. The cancel flag is read before the write and the read.
 async fn write_sink<Io: TmdsIo, F: FnMut(TmdsEvent)>(
     io: &mut Io,
@@ -294,6 +295,7 @@ async fn write_sink<Io: TmdsIo, F: FnMut(TmdsEvent)>(
     };
     let kind = error.kind();
     let ends = !transient(kind) || config.on_tmds_config_failure == OnTmdsConfigFailure::Stop;
+    let wrote = matches!(error, UpdateError::Write(_));
     emit(
         io,
         record,
@@ -338,7 +340,9 @@ async fn write_sink<Io: TmdsIo, F: FnMut(TmdsEvent)>(
         Some(read)
     };
     warnings.push(BringUpWarning::TmdsConfigWriteFailed { error, read_back });
-    Ok(Some(written_at))
+    // A failed write may have reached the sink, so the wait and the deadline run from it;
+    // a failed read wrote nothing.
+    Ok(wrote.then_some(written_at))
 }
 
 /// Spends what is left of the ratio wait after the write at `written_at`; nothing when no
@@ -1309,11 +1313,15 @@ mod tests {
             kind: DdcErrorKind::Busy,
             ends: false
         }));
-        // It carried on to the output and the check.
+        // It carried on to the output and the check. Nothing was written, so there is no
+        // write time, no wait and no deadline to run from one.
         assert_eq!(
             io.ops()[io.ops().len() - 2..],
             [Op::StartOutput, Op::ReadScramblingStatus]
         );
+        assert_eq!(r.link_up().unwrap().sink_written_at, None);
+        assert!(!io.ops().iter().any(|op| matches!(op, Op::Delay(_))));
+        assert!(r.has(TmdsEventKind::OutputStarted { after_write: None }));
 
         // A plain link: the register read back after the failure.
         let mut io = TestIo::new();

@@ -60,9 +60,12 @@ pub async fn quick_restore<Io: TmdsIo, F: FnMut(TmdsEvent)>(
                 .map_err(UpdateError::Write),
             _ => io.update_tmds_config(value).await,
         };
-        sink_written_at = Some(io.now());
+        let written_at = io.now();
         match result {
-            Ok(()) => emit(io, TmdsEventKind::TmdsConfigWritten { config: value }),
+            Ok(()) => {
+                sink_written_at = Some(written_at);
+                emit(io, TmdsEventKind::TmdsConfigWritten { config: value });
+            }
             Err(error) => {
                 // The step names the half: a read-modify-write whose read failed wrote
                 // nothing.
@@ -77,6 +80,10 @@ pub async fn quick_restore<Io: TmdsIo, F: FnMut(TmdsEvent)>(
                 if ends {
                     emit(io, end(Some(step)));
                     return Err(RestoreError::Scdc(error));
+                }
+                // A failed write may have reached the sink; a failed read wrote nothing.
+                if matches!(error, UpdateError::Write(_)) {
+                    sink_written_at = Some(written_at);
                 }
                 write_failed = Some(error);
             }
@@ -270,15 +277,31 @@ mod tests {
         io.fail_set_scrambling = true;
         io.fail_scdc = Some(DdcErrorKind::Busy);
         let (result, count, _) = restore(&mut io, &link(594_000, SINK), &BringUpConfig::DEFAULT);
+        // The read of the read-modify-write failed: nothing was written.
         assert!(matches!(
             result,
             Err(RestoreError::Phy {
                 error: (),
-                sink_written_at: Some(_),
+                sink_written_at: None,
                 write_failed: Some(UpdateError::Read(DdcErrorKind::Busy)),
             })
         ));
         assert_eq!(count, 4);
+
+        // A failed write may have reached the sink: its time is kept.
+        let mut io = TestIo::new();
+        io.fail_set_scrambling = true;
+        io.fail_scdc = Some(DdcErrorKind::Busy);
+        io.update_fails_at_write = true;
+        let (result, ..) = restore(&mut io, &link(594_000, SINK), &BringUpConfig::DEFAULT);
+        assert!(matches!(
+            result,
+            Err(RestoreError::Phy {
+                sink_written_at: Some(_),
+                write_failed: Some(UpdateError::Write(_)),
+                ..
+            })
+        ));
     }
 
     #[test]

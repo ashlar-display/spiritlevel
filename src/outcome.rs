@@ -41,7 +41,9 @@ pub enum BringUpOutcome<S, P> {
 pub struct LinkUp<S> {
     /// The link brought up.
     pub link: TmdsLinkParams,
-    /// When the sink's `TMDS_Config` was written; `None` when no write was due.
+    /// When the sink's `TMDS_Config` was written, or a write that failed was made (it may
+    /// have reached the sink); `None` when no write was due or the read of a read-modify-write
+    /// failed, so nothing was written.
     pub sink_written_at: Option<Timestamp>,
     /// When the output started.
     pub output_started_at: Timestamp,
@@ -336,8 +338,8 @@ impl<S: DdcError> ReconnectCheck<S> {
 #[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Restored<S> {
-    /// When the sink's `TMDS_Config` was written, the write failed or not; `None` when no
-    /// write was due.
+    /// When the sink's `TMDS_Config` was written, or a write that failed was made; `None`
+    /// when no write was due or the read of a read-modify-write failed.
     pub sink_written_at: Option<Timestamp>,
     /// The scrambling check; [`CheckResult::NotApplicable`] on a plain link, and
     /// [`CheckResult::Cancelled`] when the cancel flag stopped it, with the link left
@@ -361,7 +363,8 @@ pub enum RestoreError<S, P> {
     Phy {
         /// The error.
         error: P,
-        /// When the sink's `TMDS_Config` was written; `None` when no write was due.
+        /// When the sink's `TMDS_Config` was written, or a write that failed was made;
+        /// `None` when no write was due or the read of a read-modify-write failed.
         sink_written_at: Option<Timestamp>,
         /// The write's failure, when it failed and the restore carried on.
         write_failed: Option<UpdateError<S>>,
