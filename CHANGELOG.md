@@ -141,6 +141,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **The README, crate docs and roadmap describe the procedures**: the README shows a
+  bring-up and tear-down over the four parts (compiled as a doctest), lists the `culvert`
+  feature, and no longer says the crate has no dependencies without `display-types`; the
+  roadmap keeps what is still to come.
 - **The README shows the "trusted publishing only" badge**: crates.io refuses token
   uploads for this crate, and "Verifying releases" says so.
 

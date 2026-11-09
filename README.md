@@ -16,16 +16,20 @@ TMDS link bring-up for HDMI sources.
 
 `spiritlevel` decides a TMDS link's bit clock ratio (1/10 or 1/40) and scrambling from the
 TMDS character rate, what the sink and the source can do, and the caller's policy, and
-states what the sink's `TMDS_Config` must hold. Where implementations of HDMI sources
-differ, the behaviour is a setting with a documented default, and every reason the link is
-or is not scrambled is reported.
+states what the sink's `TMDS_Config` must hold. Its procedures then carry that out over the
+PHY and the sink's SCDC: bring-up, tear-down, the reconnect check after a hotplug, and the
+quick restore. Where implementations of HDMI sources differ, the behaviour is a setting
+with a documented default, every reason the link is or is not scrambled is reported, and
+every step of a procedure is recorded as a structured event.
 
 ## Status
 
-`spiritlevel` currently provides the link parameters alone: a pure, I/O-free, `const`
-function with no hardware dependency. The procedures — bring-up, tear-down and the
-reconnect check over the PHY and SCDC — are planned, together with the async companion
-`spiritlevel-async`; see the [roadmap](doc/roadmap.md).
+The link parameters are a pure, I/O-free, `const` function. The procedures are written
+once as an I/O-free core (`spiritlevel::procedure`) and driven synchronously by `TmdsLink`,
+over [hdmi-hal](https://github.com/ashlar-display/hdmi-hal)'s TMDS PHY, clock and delay
+traits and the crate's own `TmdsScdc`. Each makes one attempt per call; retries are the
+caller's. The async companion `spiritlevel-async` is planned; see the
+[roadmap](doc/roadmap.md).
 
 ## Usage
 
@@ -73,10 +77,57 @@ below 340 Mcsc when both ends can (default on), and whether exactly 340 000 kHz 
 above the threshold (default not). A rate above 340 000 kHz on a sink that cannot take
 scrambling is refused with `ParamsError::ScramblingUnsupported`, naming every missing fact.
 
+Then bring the link up over the parts: the sink's SCDC (`TmdsScdc`, implemented for
+culvert's client by the `culvert` feature), a `TmdsPhy`, a `Clock` and a `Delay`:
+
+```rust
+use hdmi_hal::phy::{TmdsPhy, TmdsVideo};
+use hdmi_hal::time::{Clock, Delay};
+use hdmi_hal::{ColorBitDepth, ColorFormat};
+use spiritlevel::{
+    BringUpConfig, BringUpOutcome, CheckResult, SinkPresence, SinkTmdsFacts,
+    SourceTmdsFacts, TearDownConfig, TmdsLink, TmdsLinkParams, TmdsPolicy, TmdsScdc,
+};
+
+/// Brings up 4K60 RGB over TMDS, then stops it again.
+fn show<S: TmdsScdc, P: TmdsPhy, K: Clock, D: Delay>(
+    scdc: S,
+    phy: P,
+    clock: K,
+    delay: D,
+    sink: SinkTmdsFacts,
+) {
+    let source = SourceTmdsFacts::from(&phy.capabilities());
+    let Ok(link) = TmdsLinkParams::choose(594_000, sink, source, TmdsPolicy::DEFAULT) else {
+        return; // a rate this sink and source cannot carry
+    };
+    let video = TmdsVideo::new(594_000, ColorBitDepth::Depth8, ColorFormat::Rgb444);
+
+    let mut tmds = TmdsLink::new(scdc, phy, clock, delay);
+    match tmds.bring_up(&link, video, &BringUpConfig::DEFAULT) {
+        Ok(BringUpOutcome::Up(up)) => {
+            // Whether the sink reports scrambled TMDS, and what went wrong without
+            // stopping the bring-up.
+            let _seen = up.check.result == CheckResult::Set;
+            for _warning in up.warnings.iter() {}
+        }
+        Ok(_cancelled) => {} // the cancel flag (`with_cancel`); never without one
+        Err(_error) => {}    // the step that failed, and the tear-down that followed
+    }
+    let _ = tmds.tear_down(&link, &TearDownConfig::DEFAULT, SinkPresence::Present);
+}
+```
+
+Each procedure has a `_with_events` form that calls a closure with every step, timestamped
+from the caller's clock; `MAX_BRING_UP_EVENTS` and its siblings bound how many, so a caller
+without `alloc` sizes its buffer.
+
 ## Features
 
 - **`display-types`** (default) — `From` conversions from display-types' `HdmiForumSinkCap`
-  into the sink facts. Without it the crate has no dependencies.
+  into the sink facts. Without it the caller fills the sink facts itself.
+- **`culvert`** — `TmdsScdc` for [culvert](https://github.com/ashlar-display/culvert)'s
+  SCDC client (`culvert::Scdc`), with culvert's errors wrapped in `CulvertError`.
 
 ## `no_std` builds
 
@@ -88,10 +139,11 @@ scrambling is refused with `ParamsError::ScramblingUnsupported`, naming every mi
 which trains FRL links: beside it in the stack, not on top of it. A link orchestrator
 chooses between them.
 
-Below it, [display-types](https://github.com/ashlar-display/display-types) supplies the
-sink's HDMI Forum capabilities (the `display-types` feature). The planned procedures will
-also use [hdmi-hal](https://github.com/ashlar-display/hdmi-hal) for the PHY and, behind a
-feature, [culvert](https://github.com/ashlar-display/culvert) for SCDC.
+Below it, [hdmi-hal](https://github.com/ashlar-display/hdmi-hal) supplies the TMDS PHY,
+clock and delay traits the procedures run over,
+[display-types](https://github.com/ashlar-display/display-types) the sink's HDMI Forum
+capabilities (the `display-types` feature), and, behind a feature,
+[culvert](https://github.com/ashlar-display/culvert) the SCDC client.
 
 ## Out of scope
 

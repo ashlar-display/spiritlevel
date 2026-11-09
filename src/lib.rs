@@ -2,9 +2,15 @@
 //!
 //! `spiritlevel` decides a TMDS link's bit clock ratio and scrambling from the TMDS
 //! character rate, the sink's and source's facts and the caller's policy, and states what
-//! the sink's `TMDS_Config` must hold. It currently provides this decision alone: a pure,
-//! I/O-free function. The bring-up, tear-down and reconnect-check procedures over the
-//! PHY and SCDC are planned.
+//! the sink's `TMDS_Config` must hold ([`TmdsLinkParams::choose`], a pure, I/O-free
+//! function). Its procedures carry that out over the PHY and the sink's SCDC: bring-up,
+//! tear-down, the reconnect check after a hotplug, and the quick restore.
+//!
+//! The procedures are written once as an I/O-free core over [`procedure::TmdsIo`], and
+//! [`TmdsLink`] drives them synchronously over a [`TmdsScdc`], hdmi-hal's `TmdsPhy`, a
+//! `Clock` and a `Delay`, with an optional [`Cancel`] flag. Each makes one attempt per
+//! call, leaving retries to the caller, and records every step as a [`TmdsEvent`] in its
+//! `_with_events` form.
 //!
 //! # Features
 //!
