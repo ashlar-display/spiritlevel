@@ -1447,6 +1447,21 @@ mod tests {
             failed_at: Some(TmdsStep::ReadTmdsConfig),
             cancelled: false
         }));
+        // With Running, the output is already on at the write.
+        let mut io = TestIo::new();
+        io.fail_scdc = Some(DdcErrorKind::Busy);
+        let r = up(
+            &mut io,
+            &link(594_000, NO_FRL),
+            &config.with_output_during_sink_write(OutputDuringSinkWrite::Running),
+        );
+        assert!(matches!(
+            r.result,
+            Err(BringUpError::Scdc {
+                output: OutputState::MayBeRunning,
+                ..
+            })
+        ));
         // The write half names the write.
         let mut io = TestIo::new();
         io.fail_scdc = Some(DdcErrorKind::Busy);
@@ -1507,6 +1522,49 @@ mod tests {
                 "{step:?}"
             );
         }
+        // With Running, the output may run from the output's start on.
+        let running = MAIN_ONLY.with_output_during_sink_write(OutputDuringSinkWrite::Running);
+        for (fail, step, output) in [
+            (0, TmdsStep::Configure, OutputState::Stopped),
+            (1, TmdsStep::SetScrambling, OutputState::Stopped),
+            (2, TmdsStep::StartOutput, OutputState::MayBeRunning),
+            (3, TmdsStep::SetScrambling, OutputState::MayBeRunning),
+        ] {
+            let mut io = TestIo::new();
+            match fail {
+                0 => io.fail_configure = true,
+                1 => io.fail_set_scrambling = true,
+                2 => io.fail_start_output = true,
+                _ => io.fail_set_scrambling_on = true,
+            }
+            let r = up(&mut io, &link(594_000, NO_FRL), &running);
+            assert!(
+                matches!(
+                    r.result,
+                    Err(BringUpError::Phy { step: s, output: o, .. }) if (s, o) == (step, output)
+                ),
+                "Running {fail}"
+            );
+        }
+        // The tear-down after a PHY failure uses the caller's settings, with the sink present.
+        let mut io = TestIo::new();
+        io.fail_start_output = true;
+        let clearing = MAIN_ONLY.with_tear_down(TearDownConfig::DEFAULT.with_clear_sink(true));
+        let r = up(&mut io, &link(594_000, NO_FRL), &clearing);
+        assert!(matches!(
+            r.result,
+            Err(BringUpError::Phy {
+                cleanup: Cleanup::TornDown(Err(TearDownError {
+                    sink: SinkClear::Cleared,
+                    ..
+                })) | Cleanup::TornDown(Ok(TornDown {
+                    sink: SinkClear::Cleared
+                })),
+                ..
+            })
+        ));
+        assert_eq!(io.tmds_config, 0);
+
         // The cleanup's own failure is in it.
         let mut io = TestIo::new();
         io.fail_stop_output = true;
@@ -1683,6 +1741,22 @@ mod tests {
         io.cancel_after_ops = Some(3);
         let r = up(&mut io, &link, &config.with_tear_down_on_error(false));
         assert!(matches!(cancelled(&r), Some((_, Cleanup::TornDown(_)))));
+        // The tear-down after a cancel uses the caller's settings, with the sink present: a
+        // cancel in the check clears what the bring-up wrote.
+        let mut io = TestIo::new();
+        io.cancel_after_ops = Some(11);
+        let clearing = config.with_tear_down(TearDownConfig::DEFAULT.with_clear_sink(true));
+        let r = up(&mut io, &link, &clearing);
+        assert!(matches!(
+            cancelled(&r),
+            Some((
+                CancelPoint::Check,
+                Cleanup::TornDown(Ok(TornDown {
+                    sink: SinkClear::Cleared
+                }))
+            ))
+        ));
+        assert_eq!(io.tmds_config, 0);
     }
 
     #[test]

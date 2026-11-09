@@ -61,6 +61,8 @@ pub struct TestIo {
     /// A failing `update_tmds_config` fails at its write rather than its read.
     pub update_fails_at_write: bool,
     pub fail_set_scrambling: bool,
+    /// `set_scrambling(true)` alone fails.
+    pub fail_set_scrambling_on: bool,
     pub fail_stop_output: bool,
     pub fail_configure: bool,
     pub fail_start_output: bool,
@@ -95,6 +97,7 @@ impl TestIo {
             scdc_calls: 0,
             update_fails_at_write: false,
             fail_set_scrambling: false,
+            fail_set_scrambling_on: false,
             fail_stop_output: false,
             fail_configure: false,
             fail_start_output: false,
@@ -219,7 +222,7 @@ impl TmdsIo for TestIo {
     }
 
     async fn set_scrambling(&mut self, enabled: bool) -> Result<(), ()> {
-        let fail = self.fail_set_scrambling;
+        let fail = self.fail_set_scrambling || (enabled && self.fail_set_scrambling_on);
         self.phy(Op::SetScrambling(enabled), fail)
     }
 
