@@ -158,11 +158,21 @@ pub enum TmdsEventKind {
         /// What it found, with the first error's kind in place of the error.
         check: crate::outcome::ScramblingCheck<DdcErrorKind>,
     },
+    /// A bring-up saw the caller's cancel flag and stopped; the tear-down's events follow,
+    /// unless it was seen at entry.
+    #[non_exhaustive]
+    BringUpCancelled {
+        /// Where the flag was seen.
+        at: CancelPoint,
+    },
     /// A bring-up ended.
     #[non_exhaustive]
     BringUpEnded {
-        /// The step that stopped it; `None` when the link is up.
+        /// The step that stopped it; `None` when the link is up or the bring-up was
+        /// cancelled.
         failed_at: Option<TmdsStep>,
+        /// Whether the cancel flag stopped it.
+        cancelled: bool,
     },
     /// The sink's `Config_1` (the FRL rate) was cleared before a bring-up.
     FrlRateCleared,
@@ -252,6 +262,20 @@ pub enum TmdsStep {
     StartOutput,
     /// Stopping the output.
     StopOutput,
+}
+
+/// Where a bring-up saw the caller's cancel flag.
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum CancelPoint {
+    /// At entry, before any I/O.
+    Entry,
+    /// Before an SCDC step.
+    Step(TmdsStep),
+    /// During the ratio wait, before one of its slices.
+    RatioWait,
+    /// During the scrambling check, before a read.
+    Check,
 }
 
 /// Why a bring-up did not write the sink's `TMDS_Config`.

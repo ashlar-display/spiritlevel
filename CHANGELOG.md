@@ -80,7 +80,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `TmdsLinkParams::sink()` gives the sink facts a link was chosen from, and
   `MAX_RECONNECT_CHECK_EVENTS` the check's bound.
 - **Bring-up's result types**, ahead of the procedure: `BringUpOutcome` (`Up` with a
-  `LinkUp`, or `Cancelled` with the tear-down's result), `BringUpError` (`Scdc` or `Phy`,
+  `LinkUp`, or `Cancelled` with where the flag was seen, the `Cleanup` and the warnings
+  gathered), `BringUpError` (`Scdc` or `Phy`,
   with the step, the output's state, the `Cleanup` and the warnings gathered), the six
   `BringUpWarning` kinds in fixed `Warnings` storage, `ScramblingCheck` with `CheckResult`
   and `FailedRead`, `OutputState` and `WriteStage`. `TmdsStep` gains the bring-up steps, so
@@ -107,7 +108,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   link; a missed deadline is a warning on a scrambled link. A PHY failure, a non-transient
   SCDC error or a failed write under `Stop` ends it with `BringUpError`, after a tear-down
   unless `tear_down_on_error` is off (with the sink taken as gone after `Detached`). Its
-  events and `MAX_BRING_UP_EVENTS`. Cancellation follows.
+  events and `MAX_BRING_UP_EVENTS`.
 - **The scrambling check in bring-up**: on a scrambled link, `Scrambling_Status` polled
   every `check_interval` until the sink reports scrambling or `check_window` ends, timed
   from the output start (from the scrambler coming on with `Running`). The result is in
@@ -115,6 +116,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   failed with `Detached` or `Unsupported`; other failed reads are counted with the first
   kept. A read count of `ceil(window / interval) + 1` ends the check on a clock that does
   not advance, marked `read_cap_reached`. One `ScramblingChecked` event carries it.
+- **Cancellation in bring-up**: the cancel flag is read at entry, before each SCDC step,
+  before each slice of the ratio wait (spent in slices of at most `check_interval`, so a
+  cancel is seen within one interval) and before each read of the check. Once set, the
+  bring-up ends `BringUpOutcome::Cancelled`, never an error: at entry before any I/O
+  (`Cleanup::Skipped`), otherwise after a tear-down with the caller's `tear_down` settings,
+  whatever `tear_down_on_error` says. `CancelPoint` says where it was seen, in the outcome
+  and in the new `BringUpCancelled` event; `BringUpEnded` gains `cancelled`. Tear-down and
+  the reconnect check are not cancelled, and the flag is never cleared.
 - **`BringUpConfig::validate`**: reports, in a `ConfigError`, a scrambling deadline shorter
   than the ratio wait and a check interval longer than the check window. The procedures
   still run with any values.

@@ -13,11 +13,12 @@ use crate::config::{
     SourceVersionWrite, TmdsConfigWrite,
 };
 use crate::event::{
-    FrlClearSkip, SourceVersionSkip, TmdsConfigSkip, TmdsEvent, TmdsEventKind, TmdsStep,
+    CancelPoint, FrlClearSkip, SourceVersionSkip, TmdsConfigSkip, TmdsEvent, TmdsEventKind,
+    TmdsStep,
 };
 use crate::outcome::{
-    BringUpError, BringUpOutcome, BringUpWarning, Cleanup, LinkUp, OutputState, ScramblingCheck,
-    Warnings, WriteStage,
+    BringUpError, BringUpOutcome, BringUpWarning, CheckResult, Cleanup, LinkUp, OutputState,
+    ScramblingCheck, Warnings, WriteStage,
 };
 use crate::params::TmdsLinkParams;
 
@@ -57,16 +58,52 @@ fn failed<Io: TmdsIo>(
     }
 }
 
+/// Why the work before both paths or the sink's write ended early: a step's stop, or the
+/// cancel flag.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum Halt<S> {
+    Stop(Stop<S>),
+    Cancelled(CancelPoint),
+}
+
+impl<S> From<Stop<S>> for Halt<S> {
+    fn from(stop: Stop<S>) -> Self {
+        Self::Stop(stop)
+    }
+}
+
+impl<S> From<CancelPoint> for Halt<S> {
+    fn from(at: CancelPoint) -> Self {
+        Self::Cancelled(at)
+    }
+}
+
+impl<S> Halt<S> {
+    /// The failure, with the output's state at a stop.
+    fn into_failure<P>(self, output: OutputState) -> Failure<S, P> {
+        match self {
+            Self::Stop(stop) => Failure::Scdc(stop, output),
+            Self::Cancelled(at) => Failure::Cancelled(at),
+        }
+    }
+}
+
+/// `Err(at)` when the caller's cancel flag is set.
+fn checkpoint<Io: TmdsIo>(io: &Io, at: CancelPoint) -> Result<(), CancelPoint> {
+    if io.cancelled() { Err(at) } else { Ok(()) }
+}
+
 /// The work before both paths, in order: the FRL clear (`Config_1`, then `FLT_update`) when
 /// the settings give it, then `Source_Version`. Nothing on a sink without SCDC. A failed
-/// write is a warning; a non-transient error stops the bring-up.
+/// write is a warning; a non-transient error stops the bring-up. The cancel flag is read
+/// before each step.
 pub(crate) async fn before_both_paths<Io: TmdsIo>(
     io: &mut Io,
     link: &TmdsLinkParams,
     config: &BringUpConfig,
     warnings: &mut Warnings<Io::ScdcError>,
     emit: &mut impl FnMut(&Io, TmdsEventKind),
-) -> Result<(), Stop<Io::ScdcError>> {
+) -> Result<(), Halt<Io::ScdcError>> {
     let sink = link.sink();
 
     let clear = match config.clear_frl {
@@ -78,6 +115,7 @@ pub(crate) async fn before_both_paths<Io: TmdsIo>(
     match clear {
         Err(reason) => emit(io, TmdsEventKind::FrlClearSkipped { reason }),
         Ok(()) => {
+            checkpoint(io, CancelPoint::Step(TmdsStep::ClearFrlRate))?;
             match io.clear_frl_rate().await {
                 Ok(()) => emit(io, TmdsEventKind::FrlRateCleared),
                 Err(e) => failed(
@@ -89,6 +127,7 @@ pub(crate) async fn before_both_paths<Io: TmdsIo>(
                     warnings,
                 )?,
             }
+            checkpoint(io, CancelPoint::Step(TmdsStep::ClearFltUpdate))?;
             match io.clear_flt_update().await {
                 Ok(was_set) => emit(io, TmdsEventKind::FltUpdateCleared { was_set }),
                 Err(e) => failed(
@@ -122,6 +161,7 @@ pub(crate) async fn before_both_paths<Io: TmdsIo>(
         }
     };
     if reads_version {
+        checkpoint(io, CancelPoint::Step(TmdsStep::SinkVersion))?;
         let version = match io.read_sink_version().await {
             Ok(version) => version,
             Err(e) => {
@@ -147,6 +187,7 @@ pub(crate) async fn before_both_paths<Io: TmdsIo>(
             return Ok(());
         }
     }
+    checkpoint(io, CancelPoint::Step(TmdsStep::SourceVersion))?;
     match io.write_source_version(1).await {
         Ok(()) => emit(io, TmdsEventKind::SourceVersionWritten { version: 1 }),
         Err(e) => failed(
@@ -161,10 +202,18 @@ pub(crate) async fn before_both_paths<Io: TmdsIo>(
     Ok(())
 }
 
-/// Why a bring-up stopped, before the cleanup: a step, its error, and the output's state.
+/// Why a bring-up stopped, before the cleanup: a step, its error, and the output's state;
+/// or the cancel flag, and where it was seen.
 enum Failure<S, P> {
     Scdc(Stop<S>, OutputState),
     Phy(TmdsStep, P, OutputState),
+    Cancelled(CancelPoint),
+}
+
+impl<S, P> From<CancelPoint> for Failure<S, P> {
+    fn from(at: CancelPoint) -> Self {
+        Self::Cancelled(at)
+    }
 }
 
 /// What the main path produced, for `LinkUp`.
@@ -197,14 +246,14 @@ fn phy_failed<Io: TmdsIo, F: FnMut(TmdsEvent)>(
 
 /// Writes the sink's `TMDS_Config` when a write is due: the time of the write (`None` when
 /// none was due), or the stop. A transient failure under `CarryOn` is a warning; on a plain
-/// link it reads the register back.
+/// link it reads the register back. The cancel flag is read before the write and the read.
 async fn write_sink<Io: TmdsIo, F: FnMut(TmdsEvent)>(
     io: &mut Io,
     link: &TmdsLinkParams,
     config: &BringUpConfig,
     warnings: &mut Warnings<Io::ScdcError>,
     record: &mut F,
-) -> Result<Option<Timestamp>, Stop<Io::ScdcError>> {
+) -> Result<Option<Timestamp>, Halt<Io::ScdcError>> {
     let Some(value) = link.sink_config() else {
         let reason = if link.sink().scdc_present {
             TmdsConfigSkip::Gate
@@ -214,6 +263,7 @@ async fn write_sink<Io: TmdsIo, F: FnMut(TmdsEvent)>(
         emit(io, record, TmdsEventKind::TmdsConfigSkipped { reason });
         return Ok(None);
     };
+    checkpoint(io, CancelPoint::Step(TmdsStep::WriteTmdsConfig))?;
     let result = match config.tmds_config_write {
         TmdsConfigWrite::WholeByte => io
             .write_tmds_config(value)
@@ -245,13 +295,21 @@ async fn write_sink<Io: TmdsIo, F: FnMut(TmdsEvent)>(
         TmdsEventKind::ScdcStepFailed { step, kind, ends },
     );
     if ends {
-        return Err(Stop { step, error });
+        return Err(Stop { step, error }.into());
     }
     // A plain link has no scrambling check: read the register back so a sink that kept
     // 1/40 after a failed clear does not go unnoticed.
     let read_back = if link.scrambling() {
         None
     } else {
+        if io.cancelled() {
+            warnings.push(BringUpWarning::TmdsConfigWriteFailed {
+                error,
+                stage,
+                read_back: None,
+            });
+            return Err(CancelPoint::Step(TmdsStep::ReadTmdsConfig).into());
+        }
         let read = io.read_tmds_config().await;
         match &read {
             Ok(config) => emit(
@@ -280,21 +338,33 @@ async fn write_sink<Io: TmdsIo, F: FnMut(TmdsEvent)>(
 }
 
 /// Spends what is left of the ratio wait after the write at `written_at`; nothing when no
-/// write was made.
+/// write was made. The wait is spent in slices of at most `slice` (the check interval;
+/// one slice when it is 0), with the cancel flag read before each, so a cancel is seen
+/// within one interval whatever the wait.
 async fn wait_after<Io: TmdsIo, F: FnMut(TmdsEvent)>(
     io: &mut Io,
     written_at: Option<Timestamp>,
     wait: Duration,
+    slice: Duration,
     record: &mut F,
-) {
+) -> Result<(), CancelPoint> {
     let Some(written_at) = written_at else {
-        return;
+        return Ok(());
     };
     let left = wait.saturating_sub(io.now().saturating_duration_since(written_at));
-    if !left.is_zero() {
-        io.delay(left).await;
+    let slice = if slice.is_zero() { left } else { slice };
+    let mut remaining = left;
+    loop {
+        checkpoint(io, CancelPoint::RatioWait)?;
+        if remaining.is_zero() {
+            break;
+        }
+        let next = remaining.min(slice);
+        io.delay(next).await;
+        remaining -= next;
     }
     emit(io, record, TmdsEventKind::WaitSpent { duration: left });
+    Ok(())
 }
 
 /// The main path in the default order: output off, the sink's write, the PHY with its
@@ -324,13 +394,20 @@ async fn main_path<Io: TmdsIo, F: FnMut(TmdsEvent)>(
     if !running {
         let written_at = write_sink(io, link, config, warnings, record)
             .await
-            .map_err(|stop| Failure::Scdc(stop, OutputState::Stopped))?;
+            .map_err(|halt| halt.into_failure(OutputState::Stopped))?;
         configure(io, phy, record).await?;
         set_scrambling(io, scrambled, OutputState::Stopped, record).await?;
-        wait_after(io, written_at, config.ratio_wait, record).await;
+        wait_after(
+            io,
+            written_at,
+            config.ratio_wait,
+            config.check_interval,
+            record,
+        )
+        .await?;
         let started = start(io, written_at, record).await?;
         deadline(io, written_at, started, scrambled, config, warnings, record);
-        let check = check_from(io, started, scrambled, config, record).await;
+        let check = check_from(io, started, scrambled, config, record).await?;
         return Ok(Up {
             sink_written_at: written_at,
             output_started_at: started,
@@ -345,8 +422,15 @@ async fn main_path<Io: TmdsIo, F: FnMut(TmdsEvent)>(
     let started = start(io, None, record).await?;
     let written_at = write_sink(io, link, config, warnings, record)
         .await
-        .map_err(|stop| Failure::Scdc(stop, OutputState::MayBeRunning))?;
-    wait_after(io, written_at, config.ratio_wait, record).await;
+        .map_err(|halt| halt.into_failure(OutputState::MayBeRunning))?;
+    wait_after(
+        io,
+        written_at,
+        config.ratio_wait,
+        config.check_interval,
+        record,
+    )
+    .await?;
     let mut check = ScramblingCheck::NOT_APPLICABLE;
     if scrambled {
         set_scrambling(io, true, OutputState::MayBeRunning, record).await?;
@@ -360,7 +444,7 @@ async fn main_path<Io: TmdsIo, F: FnMut(TmdsEvent)>(
             warnings,
             record,
         );
-        check = check_from(io, scrambling_at, scrambled, config, record).await;
+        check = check_from(io, scrambling_at, scrambled, config, record).await?;
     }
     Ok(Up {
         sink_written_at: written_at,
@@ -432,18 +516,23 @@ async fn start<Io: TmdsIo, F: FnMut(TmdsEvent)>(
 }
 
 /// The scrambling check from `from`, on a scrambled link; a plain link's check does not
-/// apply.
+/// apply. A cancelled check is the bring-up's cancellation.
 async fn check_from<Io: TmdsIo, F: FnMut(TmdsEvent)>(
     io: &mut Io,
     from: Timestamp,
     scrambled: bool,
     config: &BringUpConfig,
     record: &mut F,
-) -> ScramblingCheck<Io::ScdcError> {
-    if scrambled {
-        scrambling_check(io, from, config.check_window, config.check_interval, record).await
+) -> Result<ScramblingCheck<Io::ScdcError>, CancelPoint> {
+    if !scrambled {
+        return Ok(ScramblingCheck::NOT_APPLICABLE);
+    }
+    let check =
+        scrambling_check(io, from, config.check_window, config.check_interval, record).await;
+    if check.result == CheckResult::Cancelled {
+        Err(CancelPoint::Check)
     } else {
-        ScramblingCheck::NOT_APPLICABLE
+        Ok(check)
     }
 }
 
@@ -483,6 +572,15 @@ fn deadline<Io: TmdsIo, F: FnMut(TmdsEvent)>(
 /// register read back), a missed deadline. Whether the sink reports scrambling is the
 /// check's, part of the outcome rather than a condition of it.
 ///
+/// # Cancellation
+///
+/// The caller's cancel flag is read at entry, before each SCDC step, before each slice of
+/// the ratio wait (slices of at most `check_interval`) and before each read of the check;
+/// never mid-call. Once set, the bring-up ends [`BringUpOutcome::Cancelled`]: at entry
+/// before any I/O, otherwise after a tear-down with the caller's `tear_down` settings
+/// (`tear_down_on_error` governs errors only). The tear-down is not cancelled, and the flag
+/// is never cleared: the caller resets it before its next call.
+///
 /// Records at most [`MAX_BRING_UP_EVENTS`](crate::MAX_BRING_UP_EVENTS) events.
 ///
 /// # Errors
@@ -509,6 +607,23 @@ pub async fn bring_up<Io: TmdsIo, F: FnMut(TmdsEvent)>(
         },
     );
     let mut warnings = Warnings::new();
+    if io.cancelled() {
+        let at = CancelPoint::Entry;
+        emit(io, record, TmdsEventKind::BringUpCancelled { at });
+        emit(
+            io,
+            record,
+            TmdsEventKind::BringUpEnded {
+                failed_at: None,
+                cancelled: true,
+            },
+        );
+        return Ok(BringUpOutcome::Cancelled {
+            at,
+            cleanup: Cleanup::Skipped,
+            warnings,
+        });
+    }
     let phy = TmdsPhyConfig::new(link.rate_khz(), link.clock_ratio(), video);
 
     let result = match before_both_paths(io, link, config, &mut warnings, &mut |io, kind| {
@@ -517,12 +632,19 @@ pub async fn bring_up<Io: TmdsIo, F: FnMut(TmdsEvent)>(
     .await
     {
         Ok(()) => main_path(io, link, phy, config, &mut warnings, record).await,
-        Err(stop) => Err(Failure::Scdc(stop, OutputState::MayBeRunning)),
+        Err(halt) => Err(halt.into_failure(OutputState::MayBeRunning)),
     };
 
     let failure = match result {
         Ok(up) => {
-            emit(io, record, TmdsEventKind::BringUpEnded { failed_at: None });
+            emit(
+                io,
+                record,
+                TmdsEventKind::BringUpEnded {
+                    failed_at: None,
+                    cancelled: false,
+                },
+            );
             return Ok(BringUpOutcome::Up(LinkUp {
                 link: *link,
                 sink_written_at: up.sink_written_at,
@@ -531,44 +653,68 @@ pub async fn bring_up<Io: TmdsIo, F: FnMut(TmdsEvent)>(
                 warnings,
             }));
         }
-        Err(failure) => failure,
-    };
-
-    let (step, presence) = match &failure {
-        Failure::Scdc(stop, _) if stop.error.kind() == DdcErrorKind::Detached => {
-            (stop.step, SinkPresence::Gone)
+        Err(Failure::Cancelled(at)) => {
+            emit(io, record, TmdsEventKind::BringUpCancelled { at });
+            let torn = tear_down(io, link, &config.tear_down, SinkPresence::Present, record).await;
+            emit(
+                io,
+                record,
+                TmdsEventKind::BringUpEnded {
+                    failed_at: None,
+                    cancelled: true,
+                },
+            );
+            return Ok(BringUpOutcome::Cancelled {
+                at,
+                cleanup: Cleanup::TornDown(torn),
+                warnings,
+            });
         }
-        Failure::Scdc(stop, _) => (stop.step, SinkPresence::Present),
-        Failure::Phy(step, ..) => (*step, SinkPresence::Present),
+        Err(Failure::Scdc(Stop { step, error }, output)) => {
+            let presence = if error.kind() == DdcErrorKind::Detached {
+                SinkPresence::Gone
+            } else {
+                SinkPresence::Present
+            };
+            let error = BringUpError::Scdc {
+                step,
+                error,
+                output,
+                cleanup: Cleanup::Skipped,
+                warnings,
+            };
+            (step, presence, error)
+        }
+        Err(Failure::Phy(step, error, output)) => {
+            let error = BringUpError::Phy {
+                step,
+                error,
+                output,
+                cleanup: Cleanup::Skipped,
+                warnings,
+            };
+            (step, SinkPresence::Present, error)
+        }
     };
-    let cleanup = if config.tear_down_on_error {
-        Cleanup::TornDown(tear_down(io, link, &config.tear_down, presence, record).await)
-    } else {
-        Cleanup::Skipped
-    };
+    let (step, presence, mut error) = failure;
+
+    if config.tear_down_on_error {
+        let torn = tear_down(io, link, &config.tear_down, presence, record).await;
+        match &mut error {
+            BringUpError::Scdc { cleanup, .. } | BringUpError::Phy { cleanup, .. } => {
+                *cleanup = Cleanup::TornDown(torn);
+            }
+        }
+    }
     emit(
         io,
         record,
         TmdsEventKind::BringUpEnded {
             failed_at: Some(step),
+            cancelled: false,
         },
     );
-    Err(match failure {
-        Failure::Scdc(Stop { step, error }, output) => BringUpError::Scdc {
-            step,
-            error,
-            output,
-            cleanup,
-            warnings,
-        },
-        Failure::Phy(step, error, output) => BringUpError::Phy {
-            step,
-            error,
-            output,
-            cleanup,
-            warnings,
-        },
-    })
+    Err(error)
 }
 
 #[cfg(test)]
@@ -592,7 +738,7 @@ mod tests {
     }
 
     struct Run {
-        result: Result<(), Stop<DdcErrorKind>>,
+        result: Result<(), Halt<DdcErrorKind>>,
         warnings: Warnings<DdcErrorKind>,
         events: [Option<TmdsEventKind>; 8],
         count: usize,
@@ -809,10 +955,10 @@ mod tests {
             let r = run(&mut io, &link(594_000, FRL_SINK), &BringUpConfig::DEFAULT);
             assert_eq!(
                 r.result,
-                Err(Stop {
+                Err(Halt::Stop(Stop {
                     step,
                     error: DdcErrorKind::Detached
-                })
+                }))
             );
             assert_eq!(io.ops().len(), ok_calls + 1);
             assert!(r.has(TmdsEventKind::ScdcStepFailed {
@@ -830,11 +976,37 @@ mod tests {
         );
         assert_eq!(
             r.result,
-            Err(Stop {
+            Err(Halt::Stop(Stop {
                 step: TmdsStep::SinkVersion,
                 error: DdcErrorKind::Unsupported
-            })
+            }))
         );
+    }
+
+    #[test]
+    fn the_flag_is_read_before_each_step_before_both_paths() {
+        for (after, step) in [
+            (0, TmdsStep::ClearFrlRate),
+            (1, TmdsStep::ClearFltUpdate),
+            (2, TmdsStep::SourceVersion),
+        ] {
+            let mut io = TestIo::new();
+            io.cancel_after_ops = Some(after);
+            let r = run(&mut io, &link(594_000, FRL_SINK), &BringUpConfig::DEFAULT);
+            assert_eq!(r.result, Err(Halt::Cancelled(CancelPoint::Step(step))));
+            assert_eq!(io.ops().len(), after);
+        }
+        let mut io = TestIo::new();
+        io.cancelled = true;
+        let config = BringUpConfig::DEFAULT.with_source_version(SourceVersionWrite::IfSinkVersion1);
+        let r = run(&mut io, &link(594_000, NO_FRL), &config);
+        assert_eq!(
+            r.result,
+            Err(Halt::Cancelled(CancelPoint::Step(TmdsStep::SinkVersion)))
+        );
+        // Skipped steps read nothing.
+        let r = run(&mut io, &link(148_500, SinkTmdsFacts::NONE), &config);
+        assert_eq!(r.result, Ok(()));
     }
 
     #[test]
@@ -948,7 +1120,10 @@ mod tests {
             character_rate_khz: 594_000,
             clock_ratio: ClockRatio::Div40
         }));
-        assert!(r.has(TmdsEventKind::BringUpEnded { failed_at: None }));
+        assert!(r.has(TmdsEventKind::BringUpEnded {
+            failed_at: None,
+            cancelled: false
+        }));
     }
 
     #[test]
@@ -1167,7 +1342,8 @@ mod tests {
         );
         assert_eq!(io.ops().last(), Some(&Op::StopOutput));
         assert!(r.has(TmdsEventKind::BringUpEnded {
-            failed_at: Some(TmdsStep::WriteTmdsConfig)
+            failed_at: Some(TmdsStep::WriteTmdsConfig),
+            cancelled: false
         }));
     }
 
@@ -1282,13 +1458,161 @@ mod tests {
         ));
     }
 
+    /// Where the bring-up stopped and what it left: `None` when the link came up.
+    fn cancelled(r: &Up) -> Option<(CancelPoint, &Cleanup<DdcErrorKind, ()>)> {
+        match &r.result {
+            Ok(BringUpOutcome::Cancelled { at, cleanup, .. }) => Some((*at, cleanup)),
+            _ => None,
+        }
+    }
+
+    #[test]
+    fn a_flag_set_at_entry_ends_it_before_any_io() {
+        let mut io = TestIo::new();
+        io.cancelled = true;
+        let r = up(&mut io, &link(594_000, FRL_SINK), &BringUpConfig::DEFAULT);
+        assert_eq!(
+            r.result,
+            Ok(BringUpOutcome::Cancelled {
+                at: CancelPoint::Entry,
+                cleanup: Cleanup::Skipped,
+                warnings: Warnings::new(),
+            })
+        );
+        assert!(io.ops().is_empty());
+        assert_eq!(r.count, 3);
+        assert_eq!(
+            r.events[1],
+            Some(TmdsEventKind::BringUpCancelled {
+                at: CancelPoint::Entry
+            })
+        );
+        assert_eq!(
+            r.events[2],
+            Some(TmdsEventKind::BringUpEnded {
+                failed_at: None,
+                cancelled: true
+            })
+        );
+    }
+
+    #[test]
+    fn a_cancel_is_seen_at_the_next_point_and_tears_down() {
+        // Ops of the full run: 0 ClearFrlRate, 1 ClearFltUpdate, 2 WriteSourceVersion,
+        // 3 StopOutput, 4 UpdateTmdsConfig, 5 Configure, 6 SetScrambling, 7-9 the wait's
+        // three slices, 10 StartOutput, then the check: 11 a read, 12 a delay, 13 a read,
+        // 14 a delay, 15 the read that sees scrambling.
+        let config = BringUpConfig::DEFAULT.with_ratio_wait(Duration::from_millis(3));
+        let link = link(594_000, FRL_SINK);
+        let run = |after: Option<usize>| {
+            let mut io = TestIo::new();
+            io.status_set_from_read = Some(3);
+            io.cancel_after_ops = after;
+            let r = up(&mut io, &link, &config);
+            (r, io)
+        };
+        let (full, io) = run(None);
+        assert!(full.link_up().is_some());
+        assert_eq!(io.ops().len(), 16);
+        let mut all = [Op::StopOutput; 16];
+        all.copy_from_slice(io.ops());
+        assert!(
+            all[7..10]
+                .iter()
+                .all(|op| matches!(op, Op::Delay(d) if *d <= Duration::from_millis(1)))
+        );
+
+        let step = CancelPoint::Step;
+        for (after, at, ran) in [
+            (1, step(TmdsStep::ClearFltUpdate), 1),
+            (2, step(TmdsStep::SourceVersion), 2),
+            // The PHY's calls are not points: the next one is the sink's write.
+            (3, step(TmdsStep::WriteTmdsConfig), 4),
+            (4, step(TmdsStep::WriteTmdsConfig), 4),
+            (5, CancelPoint::RatioWait, 7),
+            (8, CancelPoint::RatioWait, 8),
+            (10, CancelPoint::RatioWait, 10),
+            (11, CancelPoint::Check, 11),
+            (12, CancelPoint::Check, 13),
+            (15, CancelPoint::Check, 15),
+        ] {
+            let (r, io) = run(Some(after));
+            let (seen, cleanup) = cancelled(&r).expect("cancelled");
+            assert_eq!(seen, at, "after {after}");
+            assert_eq!(io.ops()[..ran], all[..ran], "after {after}");
+            // Then the tear-down, whatever `tear_down_on_error` says: the output stopped.
+            assert_eq!(io.ops()[ran..], [Op::StopOutput], "after {after}");
+            assert_eq!(
+                cleanup,
+                &Cleanup::TornDown(Ok(TornDown {
+                    sink: SinkClear::NotRequested
+                }))
+            );
+            assert!(r.has(TmdsEventKind::BringUpCancelled { at }));
+            assert!(r.has(TmdsEventKind::BringUpEnded {
+                failed_at: None,
+                cancelled: true
+            }));
+        }
+        // A cancelled check is recorded, and it ends the bring-up rather than its outcome.
+        let (r, _) = run(Some(11));
+        assert!(r.events[..r.count].iter().any(|e| matches!(
+            e,
+            Some(TmdsEventKind::ScramblingChecked { check }) if check.result == CheckResult::Cancelled
+        )));
+        // Once the check saw scrambling, a later flag changes nothing.
+        let (r, _) = run(Some(16));
+        assert!(cancelled(&r).is_none());
+        let mut io = TestIo::new();
+        io.cancel_after_ops = Some(3);
+        let r = up(&mut io, &link, &config.with_tear_down_on_error(false));
+        assert!(matches!(cancelled(&r), Some((_, Cleanup::TornDown(_)))));
+    }
+
+    #[test]
+    fn a_plain_link_reads_the_flag_before_its_read_back() {
+        let mut io = TestIo::new();
+        io.fail_scdc = Some(DdcErrorKind::Busy);
+        io.scdc_failures = 1;
+        io.cancel_after_ops = Some(2); // StopOutput, then the failed write
+        let r = up(&mut io, &link(148_500, NO_FRL), &MAIN_ONLY);
+        assert!(matches!(
+            &r.result,
+            Ok(BringUpOutcome::Cancelled {
+                at: CancelPoint::Step(TmdsStep::ReadTmdsConfig),
+                warnings,
+                ..
+            }) if warnings.iter().any(|w| matches!(
+                w,
+                BringUpWarning::TmdsConfigWriteFailed { read_back: None, .. }
+            ))
+        ));
+        assert!(!io.ops().contains(&Op::ReadTmdsConfig));
+    }
+
+    #[test]
+    fn a_zero_interval_spends_the_wait_in_one_delay() {
+        let mut io = TestIo::new();
+        io.scrambling_status = 0x01;
+        let config = MAIN_ONLY
+            .with_ratio_wait(Duration::from_millis(3))
+            .with_check_interval(Duration::ZERO);
+        up(&mut io, &link(594_000, NO_FRL), &config);
+        let delays = io
+            .ops()
+            .iter()
+            .filter(|op| matches!(op, Op::Delay(_)))
+            .count();
+        assert_eq!(delays, 1);
+    }
+
     #[test]
     fn no_combination_records_more_than_the_bound() {
         for rate in [148_500, 594_000] {
             for sink in [FRL_SINK, NO_FRL, SinkTmdsFacts::NONE] {
                 for running in [false, true] {
                     for whole in [false, true] {
-                        for fail in 0..8 {
+                        for fail in 0..11 {
                             let Ok(link) = TmdsLinkParams::choose(
                                 rate,
                                 sink,
@@ -1309,6 +1633,12 @@ mod tests {
                                     io.fail_scdc = Some(DdcErrorKind::Busy);
                                     io.fail_stop_output = true;
                                 }
+                                8 => io.cancel_after_ops = Some(4),
+                                9 => io.cancel_after_ops = Some(8),
+                                10 => {
+                                    io.fail_scdc = Some(DdcErrorKind::Busy);
+                                    io.cancel_after_ops = Some(5);
+                                }
                                 _ => {}
                             }
                             let mut config = BringUpConfig::DEFAULT
@@ -1323,7 +1653,9 @@ mod tests {
                                 config.tmds_config_write = TmdsConfigWrite::WholeByte;
                             }
                             let r = up(&mut io, &link, &config);
-                            assert_eq!(r.link_up().is_some(), r.result.is_ok());
+                            let cancelled =
+                                matches!(r.result, Ok(BringUpOutcome::Cancelled { .. }));
+                            assert_eq!(r.link_up().is_some(), r.result.is_ok() && !cancelled);
                         }
                     }
                 }

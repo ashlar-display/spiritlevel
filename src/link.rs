@@ -515,6 +515,20 @@ mod tests {
             link.tear_down(&scrambled(), &TearDownConfig::DEFAULT, SinkPresence::Gone)
                 .is_ok()
         );
+        // A bring-up sees it at entry and makes no call.
+        let video = hdmi_hal::phy::TmdsVideo::new(
+            594_000,
+            hdmi_hal::ColorBitDepth::Depth8,
+            hdmi_hal::ColorFormat::Rgb444,
+        );
+        assert!(matches!(
+            link.bring_up(&scrambled(), video, &BringUpConfig::DEFAULT),
+            Ok(BringUpOutcome::Cancelled {
+                at: crate::CancelPoint::Entry,
+                cleanup: crate::Cleanup::Skipped,
+                ..
+            })
+        ));
         let (sink, _, _, _, cancel) = link.into_parts();
         assert_eq!(sink.writes, 0);
         assert!(cancel.is_cancelled());

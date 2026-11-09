@@ -9,7 +9,7 @@ use core::time::Duration;
 use hdmi_hal::ddc::{DdcError, DdcErrorKind};
 use hdmi_hal::time::Timestamp;
 
-use crate::event::TmdsStep;
+use crate::event::{CancelPoint, TmdsStep};
 use crate::params::TmdsLinkParams;
 use crate::types::SinkTmdsConfig;
 
@@ -19,9 +19,17 @@ use crate::types::SinkTmdsConfig;
 pub enum BringUpOutcome<S, P> {
     /// The link is up.
     Up(LinkUp<S>),
-    /// The caller's cancel flag stopped the attempt during a wait or the check; tear-down
-    /// ran first, and its result is here. Never a failure.
-    Cancelled(Result<TornDown<S>, TearDownError<S, P>>),
+    /// The caller's cancel flag stopped the attempt. Never a failure.
+    #[non_exhaustive]
+    Cancelled {
+        /// Where the flag was seen.
+        at: CancelPoint,
+        /// The tear-down that followed, whatever `tear_down_on_error` says;
+        /// [`Cleanup::Skipped`] for a flag seen at entry, before any I/O.
+        cleanup: Cleanup<S, P>,
+        /// What went wrong before the flag was seen, without stopping the bring-up.
+        warnings: Warnings<S>,
+    },
 }
 
 /// A link that is up: steps up to the output's start completed. Whether the sink reports
@@ -64,7 +72,8 @@ pub enum BringUpWarning<S> {
         /// written) or the write ([`WriteStage::Write`] for a whole-byte write).
         stage: WriteStage,
         /// On a plain link, the register read back after the failure, or the read's error;
-        /// `None` on other links, which the check covers.
+        /// `None` on other links, which the check covers, and when the cancel flag stopped
+        /// the bring-up before the read.
         read_back: Option<Result<SinkTmdsConfig, S>>,
     },
     /// The output started later after the sink's write than the deadline allows.
@@ -156,13 +165,15 @@ pub enum BringUpError<S, P> {
     },
 }
 
-/// What happened after a bring-up's error.
+/// What happened after a bring-up's error or cancellation.
 #[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Cleanup<S, P> {
-    /// A tear-down ran (`tear_down_on_error`, the default); its result.
+    /// A tear-down ran (after an error with `tear_down_on_error`, the default, or after a
+    /// cancellation); its result.
     TornDown(Result<TornDown<S>, TearDownError<S, P>>),
-    /// No tear-down (`tear_down_on_error: false`): both ends as the error left them.
+    /// No tear-down: after an error with `tear_down_on_error: false`, both ends as the
+    /// error left them; or a cancellation seen at entry, before any I/O.
     Skipped,
 }
 

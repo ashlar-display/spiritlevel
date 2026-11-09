@@ -68,6 +68,8 @@ pub struct TestIo {
     pub sink_version: u8,
     pub flt_update: bool,
     pub cancelled: bool,
+    /// The cancel flag reads as set once this many operations were made.
+    pub cancel_after_ops: Option<usize>,
     /// `Scrambling_Status` reads as set from this read on (1-based), overriding the register.
     pub status_set_from_read: Option<u32>,
     status_reads: u32,
@@ -95,6 +97,7 @@ impl TestIo {
             sink_version: 1,
             flt_update: false,
             cancelled: false,
+            cancel_after_ops: None,
             status_set_from_read: None,
             status_reads: 0,
             frozen_clock: false,
@@ -223,7 +226,7 @@ impl TmdsIo for TestIo {
     }
 
     fn cancelled(&self) -> bool {
-        self.cancelled
+        self.cancelled || self.cancel_after_ops.is_some_and(|n| self.len >= n)
     }
 }
 

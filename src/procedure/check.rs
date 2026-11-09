@@ -28,7 +28,8 @@ fn read_cap(window: Duration, interval: Duration) -> u32 {
 /// or the read count is reached. At least one read; the window is checked with the clock
 /// before each later read, so a slow failing read overruns it by at most one read. A failed
 /// read does not end the check unless its error is not transient (`Detached`,
-/// `Unsupported`). Records one event, at its end.
+/// `Unsupported`). The cancel flag is read before every read; once set, the check ends
+/// [`CheckResult::Cancelled`]. Records one event, at its end.
 pub(crate) async fn scrambling_check<Io: TmdsIo, F: FnMut(TmdsEvent)>(
     io: &mut Io,
     from: Timestamp,
@@ -56,6 +57,10 @@ pub(crate) async fn scrambling_check<Io: TmdsIo, F: FnMut(TmdsEvent)>(
                 break;
             }
             io.delay(interval).await;
+        }
+        if io.cancelled() {
+            check.result = CheckResult::Cancelled;
+            break;
         }
         let read = io.read_scrambling_status().await;
         check.reads += 1;
@@ -181,6 +186,22 @@ mod tests {
         assert_eq!(check.result, CheckResult::NotSet);
         assert!(check.read_cap_reached);
         assert_eq!(check.reads, 201);
+    }
+
+    #[test]
+    fn the_flag_is_read_before_every_read() {
+        let mut io = TestIo::new();
+        io.cancelled = true;
+        let (check, event) = run(&mut io);
+        assert_eq!((check.result, check.reads), (CheckResult::Cancelled, 0));
+        assert_eq!(event, Some(TmdsEventKind::ScramblingChecked { check }));
+
+        let mut io = TestIo::new();
+        io.fail_scdc = Some(DdcErrorKind::Busy);
+        io.cancel_after_ops = Some(5); // three reads and the delays between them
+        let (check, _) = run(&mut io);
+        assert_eq!(check.result, CheckResult::Cancelled);
+        assert_eq!((check.reads, check.failed_reads), (3, 3));
     }
 
     #[test]
