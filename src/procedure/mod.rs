@@ -31,7 +31,10 @@ use crate::types::{ScramblingStatus, SinkTmdsConfig, TmdsConfigReading};
 /// the clock, the delay, and the cancel flag.
 ///
 /// Each method's contract is its namesake's.
-#[allow(async_fn_in_trait)]
+#[allow(
+    async_fn_in_trait,
+    reason = "the core is driven by its own drivers; a Send bound for spawning belongs to the async companion's twin"
+)]
 pub trait TmdsIo {
     /// The SCDC error, classified by [`DdcError::kind`].
     type ScdcError: DdcError;
