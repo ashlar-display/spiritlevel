@@ -267,7 +267,7 @@ pub enum OnTmdsConfigFailure {
 #[non_exhaustive]
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
 pub enum ClearFrl {
-    /// A sink that declares FRL (the default).
+    /// A sink that declares FRL (the default, chosen: the two sources differ).
     #[default]
     IfSinkDeclaresFrl,
     /// Every sink with SCDC.
@@ -278,7 +278,7 @@ pub enum ClearFrl {
 #[non_exhaustive]
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
 pub enum SourceVersionWrite {
-    /// On every bring-up to a sink with SCDC (the default).
+    /// On every bring-up to a sink with SCDC (the default, chosen: no two sources agree).
     #[default]
     EveryBringUp,
     /// Only when `Sink_Version` reads 1; a failed read writes nothing.
@@ -358,7 +358,7 @@ pub enum SinkClearTiming {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
 pub enum ScramblerOff {
     /// After the sink is cleared, or after its place in the order when it is not (the
-    /// default, chosen).
+    /// default, the majority's).
     #[default]
     AfterSink,
     /// Before the sink is cleared.
