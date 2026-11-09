@@ -5,6 +5,7 @@
 //!
 //! `S` is the SCDC error ([`TmdsScdc::Error`](crate::TmdsScdc::Error)), `P` the PHY error.
 
+use core::fmt;
 use core::time::Duration;
 
 use hdmi_hal::ddc::{DdcError, DdcErrorKind};
@@ -400,9 +401,151 @@ pub struct TearDownError<S, P> {
     pub output: Option<P>,
 }
 
+impl<S: fmt::Display, P: fmt::Debug> fmt::Display for BringUpError<S, P> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Scdc { step, error, .. } => {
+                write!(f, "bring-up stopped at {step:?}: SCDC error: {error}")
+            }
+            Self::Phy { step, error, .. } => {
+                write!(f, "bring-up stopped at {step:?}: PHY error: {error:?}")
+            }
+        }
+    }
+}
+
+/// The SCDC error is the source; a PHY error, which is only `Debug`, has none.
+impl<S: core::error::Error + 'static, P: fmt::Debug> core::error::Error for BringUpError<S, P> {
+    fn source(&self) -> Option<&(dyn core::error::Error + 'static)> {
+        match self {
+            Self::Scdc { error, .. } => Some(error),
+            Self::Phy { .. } => None,
+        }
+    }
+}
+
+impl<S, P: fmt::Debug> fmt::Display for TearDownError<S, P> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("tear-down: ")?;
+        match (&self.scrambler, &self.output) {
+            (Some(s), Some(o)) => write!(
+                f,
+                "turning the scrambler off failed: {s:?}; stopping the output failed: {o:?}"
+            ),
+            (Some(s), None) => write!(f, "turning the scrambler off failed: {s:?}"),
+            (None, Some(o)) => write!(f, "stopping the output failed: {o:?}"),
+            (None, None) => f.write_str("a PHY step failed"),
+        }
+    }
+}
+
+/// Its failures are the PHY's, which are only `Debug`, so it has no source.
+impl<S: fmt::Debug, P: fmt::Debug> core::error::Error for TearDownError<S, P> {}
+
+impl<S: fmt::Display, P: fmt::Debug> fmt::Display for RestoreError<S, P> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Scdc(error) => write!(f, "quick restore stopped at the sink's write: {error}"),
+            Self::Phy { error, .. } => {
+                write!(f, "quick restore: setting the scrambler failed: {error:?}")
+            }
+        }
+    }
+}
+
+/// The write's error is the source; a PHY error, which is only `Debug`, has none.
+impl<S: core::error::Error + 'static, P: fmt::Debug> core::error::Error for RestoreError<S, P> {
+    fn source(&self) -> Option<&(dyn core::error::Error + 'static)> {
+        match self {
+            Self::Scdc(error) => Some(error),
+            Self::Phy { .. } => None,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[derive(Debug, Clone, Copy, PartialEq)]
+    struct Bus;
+
+    impl fmt::Display for Bus {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            f.write_str("bus gone")
+        }
+    }
+
+    impl core::error::Error for Bus {}
+
+    #[test]
+    fn errors_print_and_chain() {
+        extern crate std;
+        use core::error::Error;
+        use std::string::ToString;
+
+        let scdc = BringUpError::<Bus, ()>::Scdc {
+            step: TmdsStep::WriteTmdsConfig,
+            error: Bus,
+            output: OutputState::Stopped,
+            cleanup: Cleanup::Skipped,
+            warnings: Warnings::new(),
+        };
+        assert_eq!(
+            scdc.to_string(),
+            "bring-up stopped at WriteTmdsConfig: SCDC error: bus gone"
+        );
+        assert_eq!(scdc.source().unwrap().to_string(), "bus gone");
+        let phy = BringUpError::<Bus, ()>::Phy {
+            step: TmdsStep::StartOutput,
+            error: (),
+            output: OutputState::MayBeRunning,
+            cleanup: Cleanup::Skipped,
+            warnings: Warnings::new(),
+        };
+        assert_eq!(
+            phy.to_string(),
+            "bring-up stopped at StartOutput: PHY error: ()"
+        );
+        assert!(phy.source().is_none());
+
+        let torn = |scrambler, output| TearDownError::<Bus, ()> {
+            sink: SinkClear::NotRequested,
+            scrambler,
+            output,
+        };
+        assert_eq!(
+            torn(Some(()), Some(())).to_string(),
+            "tear-down: turning the scrambler off failed: (); stopping the output failed: ()"
+        );
+        assert_eq!(
+            torn(Some(()), None).to_string(),
+            "tear-down: turning the scrambler off failed: ()"
+        );
+        assert_eq!(
+            torn(None, Some(())).to_string(),
+            "tear-down: stopping the output failed: ()"
+        );
+        assert_eq!(torn(None, None).to_string(), "tear-down: a PHY step failed");
+        assert!(torn(None, Some(())).source().is_none());
+
+        let restore = RestoreError::<Bus, ()>::Scdc(UpdateError::Read(Bus));
+        assert_eq!(
+            restore.to_string(),
+            "quick restore stopped at the sink's write: read failed, nothing written: bus gone"
+        );
+        assert!(restore.source().is_some());
+        let restore = RestoreError::<Bus, ()>::Phy {
+            error: (),
+            sink_written_at: None,
+            write_failed: None,
+        };
+        assert_eq!(
+            restore.to_string(),
+            "quick restore: setting the scrambler failed: ()"
+        );
+        assert!(restore.source().is_none());
+    }
 
     #[test]
     fn warnings_keep_the_order_and_never_overflow() {

@@ -724,7 +724,9 @@ pub enum RestoreError<S, P> {
 }
 ```
 
-All are `Debug, Clone, Copy, PartialEq, Eq` where `S` and `P` are. The warnings live in fixed
+All are `Debug, Clone, Copy, PartialEq, Eq` where `S` and `P` are. `BringUpError`,
+`TearDownError` and `RestoreError` implement `Display` and `core::error::Error`, with the
+SCDC error as the source (a PHY error, which is only `Debug`, has none). The warnings live in fixed
 storage, one slot per kind, so an outcome needs no `alloc`.
 
 - **Why `Cancelled` is an outcome, not an error:** the caller asked for it, and the link

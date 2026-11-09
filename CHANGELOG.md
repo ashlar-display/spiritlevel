@@ -153,6 +153,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   longer than the ratio wait (every bring-up would miss it), a check interval not shorter
   than the check window (the check reads once) and a check interval of 0 (back-to-back
   reads). The procedures still run with any values.
+- **`BringUpError`, `TearDownError` and `RestoreError` implement `Display` and
+  `core::error::Error`**, with the SCDC error as the `source`; a PHY error, which is only
+  `Debug`, is printed with it and has none.
 
 ### Changed
 
