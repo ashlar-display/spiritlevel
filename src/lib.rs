@@ -25,6 +25,7 @@ mod error;
 mod event;
 mod outcome;
 mod params;
+pub mod procedure;
 mod scdc;
 mod types;
 
