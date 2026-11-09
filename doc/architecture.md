@@ -349,7 +349,7 @@ A caller stops a running procedure through its `Cancel` flag (`&AtomicBool` impl
 never by dropping the future: a dropped call leaves the PHY and the sink in an unknown state.
 Bring-up reads the flag at entry, before each SCDC step, before each slice of the ratio wait
 and before each read of the check, so a cancel is seen within one `check_interval` whatever
-the configured wait. Once it is set, the bring-up ends `BringUpOutcome::Cancelled`, never an
+the configured wait (with an interval of 0 the wait is one slice, read before it). Once it is set, the bring-up ends `BringUpOutcome::Cancelled`, never an
 error, with where it was seen (`CancelPoint`):
 
 - at entry, before any I/O, with nothing torn down (`Cleanup::Skipped`);

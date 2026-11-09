@@ -19,13 +19,18 @@ pub struct BringUpConfig {
     /// How long to wait after the sink's `TMDS_Config` write before starting the output, so
     /// the sink can switch its clock ratio. Default 1 ms.
     pub ratio_wait: Duration,
-    /// How long after the output starts the sink should report scrambling; a later report
-    /// is a warning, not a failure. Default 100 ms.
+    /// The longest time from the sink's `TMDS_Config` write to scrambled output reaching
+    /// the sink: to the output's start, or with [`OutputDuringSinkWrite::Running`] to the
+    /// scrambler coming on. The wait counts towards it. Later is a warning
+    /// ([`DeadlineMissed`](crate::BringUpWarning::DeadlineMissed)), not a failure. Default
+    /// 100 ms.
     pub scrambling_deadline: Duration,
-    /// How long the scrambling check reads `Scrambling_Status` after the output starts.
-    /// Default 200 ms.
+    /// How long the scrambling check reads `Scrambling_Status`, from the output's start (from
+    /// the scrambler coming on, with [`OutputDuringSinkWrite::Running`] and in the quick
+    /// restore). Default 200 ms.
     pub check_window: Duration,
-    /// The time between two reads of the check. Default 1 ms.
+    /// The time between two reads of the check, and the longest slice of the ratio wait
+    /// between two reads of the cancel flag. Default 1 ms.
     pub check_interval: Duration,
     /// Which sinks get the FRL clear before a bring-up.
     pub clear_frl: ClearFrl,

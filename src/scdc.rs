@@ -1,6 +1,6 @@
 //! The sink-side operations the procedures make: [`TmdsScdc`].
 //!
-//! A trait of this crate's own rather than culvert's client: it holds the seven operations
+//! A trait of this crate's own rather than culvert's client: it holds the eight operations
 //! the procedures need and nothing more, in the procedures' vocabulary ([`SinkTmdsConfig`],
 //! [`ScramblingStatus`]), so a firmware with its own SCDC code, a kernel driver with SCDC
 //! helpers, or a test double implements it without culvert's whole register map. With the

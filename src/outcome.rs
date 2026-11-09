@@ -79,7 +79,8 @@ pub enum BringUpWarning<S> {
         /// the bring-up before the read.
         read_back: Option<Result<TmdsConfigReading, S>>,
     },
-    /// The output started later after the sink's write than the deadline allows.
+    /// Scrambled output reached the sink later after its write than the deadline allows: the
+    /// output's start, or with `Running` the scrambler coming on.
     #[non_exhaustive]
     DeadlineMissed {
         /// By how much.
@@ -209,7 +210,9 @@ pub struct ScramblingCheck<S> {
     pub failed_reads: u32,
     /// The first failed read.
     pub first_error: Option<FailedRead<S>>,
-    /// When the sink was first seen reporting scrambling, from the output's start.
+    /// When the sink was first seen reporting scrambling, from the check's start: the
+    /// output's start, or the scrambler coming on (with `Running`, and in the quick
+    /// restore).
     pub set_after: Option<Duration>,
     /// The check ended on its read count, not its window: the clock did not advance as
     /// the reads expected.
@@ -270,7 +273,7 @@ pub enum CheckResult {
 pub struct FailedRead<S> {
     /// The error.
     pub error: S,
-    /// When it came, from the output's start.
+    /// When it came, from the check's start (see [`ScramblingCheck::set_after`]).
     pub after: Duration,
 }
 

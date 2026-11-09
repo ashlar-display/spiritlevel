@@ -348,7 +348,7 @@ async fn write_sink<Io: TmdsIo, F: FnMut(TmdsEvent)>(
 /// Spends what is left of the ratio wait after the write at `written_at`; nothing when no
 /// write was made. The wait is spent in slices of at most `slice` (the check interval;
 /// one slice when it is 0), with the cancel flag read before each, so a cancel is seen
-/// within one interval whatever the wait.
+/// within one interval whatever the wait; with an interval of 0, only before the wait.
 async fn wait_after<Io: TmdsIo, F: FnMut(TmdsEvent)>(
     io: &mut Io,
     written_at: Option<Timestamp>,
