@@ -156,6 +156,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Internal
 
+- CI fails on `main`, and the publish workflow before anything is built, when `Cargo.toml`
+  has a `[patch]` section: `cargo package` drops it, so a release built with one would not
+  build from crates.io.
 - CI and the publish workflow's verify job lint and build the `culvert` feature, for the
   host and the bare `thumbv7em-none-eabi` target.
 - Releases publish through crates.io trusted publishing only: the first-publish token path
