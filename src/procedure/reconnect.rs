@@ -170,6 +170,24 @@ mod tests {
         assert_eq!(result, ReconnectCheck::Unreadable(DdcErrorKind::Detached));
         assert_eq!(io.ops(), [Op::ReadTmdsConfig]);
         assert_eq!(count, MAX_RECONNECT_CHECK_EVENTS);
+        // The failed read is the check's end: its event says so.
+        let mut io = TestIo::new();
+        io.fail_scdc = Some(DdcErrorKind::Detached);
+        let mut ended = false;
+        block_on(check_reconnect(
+            &mut io,
+            &link(594_000, SINK),
+            SINK,
+            &mut |e| {
+                ended |= e.kind
+                    == TmdsEventKind::ScdcStepFailed {
+                        step: TmdsStep::ReadTmdsConfig,
+                        kind: DdcErrorKind::Detached,
+                        ends: true,
+                    };
+            },
+        ));
+        assert!(ended);
     }
 
     #[test]

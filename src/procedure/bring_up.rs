@@ -1438,6 +1438,28 @@ mod tests {
                 read_back: Some(Ok(read)),
             }) if read.config == SinkTmdsConfig::new(true, true) && read.raw == 0x03
         ));
+
+        // A read-back that fails too is a warning's part, not the end.
+        let mut io = TestIo::new();
+        io.fail_scdc = Some(DdcErrorKind::Busy);
+        io.scdc_failures = 2;
+        let r = up(
+            &mut io,
+            &link(148_500, NO_FRL),
+            &MAIN_ONLY.with_tmds_config_write(TmdsConfigWrite::WholeByte),
+        );
+        assert!(matches!(
+            r.link_up().unwrap().warnings.iter_warnings().next(),
+            Some(BringUpWarning::TmdsConfigWriteFailed {
+                read_back: Some(Err(DdcErrorKind::Busy)),
+                ..
+            })
+        ));
+        assert!(r.has(TmdsEventKind::ScdcStepFailed {
+            step: TmdsStep::ReadTmdsConfig,
+            kind: DdcErrorKind::Busy,
+            ends: false
+        }));
     }
 
     #[test]

@@ -262,6 +262,18 @@ mod tests {
         assert!(restored.sink_written_at.is_some());
         assert_eq!(restored.check.result, CheckResult::Set);
 
+        // A whole-byte write has no read: its failure is the write's.
+        let mut io = TestIo::new();
+        io.fail_scdc = Some(DdcErrorKind::Busy);
+        io.scdc_failures = 1;
+        io.scrambling_status = 0x01;
+        let whole = BringUpConfig::DEFAULT.with_tmds_config_write(TmdsConfigWrite::WholeByte);
+        let (result, ..) = restore(&mut io, &link(594_000, SINK), &whole);
+        assert_eq!(
+            result.unwrap().write_failed,
+            Some(UpdateError::Write(DdcErrorKind::Busy))
+        );
+
         let stop = BringUpConfig::DEFAULT.with_on_tmds_config_failure(OnTmdsConfigFailure::Stop);
         let mut io = TestIo::new();
         io.fail_scdc = Some(DdcErrorKind::Busy);

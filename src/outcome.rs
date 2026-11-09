@@ -559,6 +559,7 @@ mod tests {
             by: Duration::from_millis(3),
         });
         assert_eq!(w.len(), 2);
+        assert!(!w.is_empty());
         let mut it = w.iter_warnings();
         assert_eq!(
             it.next(),
