@@ -17,6 +17,7 @@
 
 mod error;
 mod params;
+mod scdc;
 mod types;
 
 // Compiles and runs the README's examples as doctests.
@@ -26,6 +27,7 @@ struct ReadmeDoctests;
 
 pub use error::{ParamsError, UpdateError};
 pub use params::{ScramblingDecision, ScramblingOff, TmdsLinkParams};
+pub use scdc::TmdsScdc;
 pub use types::{
     ClockRatio, ScramblingStatus, ScramblingThreshold, SinkTmdsConfig, SinkTmdsFacts,
     SourceTmdsFacts, TmdsPolicy,

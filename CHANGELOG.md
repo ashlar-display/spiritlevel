@@ -34,6 +34,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   equals the one written. `ScramblingStatus` is what the sink reports in
   `Scrambling_Status`, with the byte read (`raw()`). `UpdateError<E>` (`Read` or `Write`) is
   the error of an operation made of a read and a write, saying which failed.
+- **`TmdsScdc`**, the sink-side SCDC operations the procedures make: `TMDS_Config` written
+  whole (`write_tmds_config`) or read-modify-written (`update_tmds_config`), read back
+  (`read_tmds_config`), `Scrambling_Status`, `Sink_Version` and `Source_Version`, and the FRL
+  clear (`clear_frl_rate`, `clear_flt_update`). Its error is a `DdcError`, so a procedure
+  can tell a failure that will pass from one that will not. A trait of the crate's own, so
+  an SCDC implementation without culvert can provide it.
 
 ### Changed
 
