@@ -88,7 +88,6 @@ pub struct Warnings<S> {
 
 impl<S> Warnings<S> {
     /// No warnings.
-    #[allow(dead_code, reason = "used by the bring-up procedure, which follows")]
     pub(crate) const fn new() -> Self {
         Self {
             list: [None, None, None, None, None, None],
@@ -97,7 +96,6 @@ impl<S> Warnings<S> {
     }
 
     /// Adds `warning`. A bring-up adds each kind at most once, so there is always room.
-    #[allow(dead_code, reason = "used by the bring-up procedure, which follows")]
     pub(crate) fn push(&mut self, warning: BringUpWarning<S>) {
         if let Some(slot) = self.list.get_mut(self.len) {
             *slot = Some(warning);
@@ -207,7 +205,6 @@ pub struct ScramblingCheck<S> {
 
 impl<S> ScramblingCheck<S> {
     /// The check of a plain link: nothing read.
-    #[allow(dead_code, reason = "used by the bring-up procedure, which follows")]
     pub(crate) const NOT_APPLICABLE: Self = Self {
         result: CheckResult::NotApplicable,
         reads: 0,

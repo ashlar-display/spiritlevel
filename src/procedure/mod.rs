@@ -10,6 +10,7 @@ mod bring_up;
 mod reconnect;
 mod tear_down;
 
+pub use bring_up::bring_up;
 pub use reconnect::check_reconnect;
 pub use tear_down::tear_down;
 

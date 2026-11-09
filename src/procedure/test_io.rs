@@ -53,7 +53,11 @@ pub struct TestIo {
     /// SCDC calls fail with this kind, once `scdc_ok_calls` of them have succeeded.
     pub fail_scdc: Option<DdcErrorKind>,
     pub scdc_ok_calls: usize,
+    /// How many SCDC calls fail after that; the rest succeed again.
+    pub scdc_failures: usize,
     scdc_calls: usize,
+    /// A failing `update_tmds_config` fails at its write rather than its read.
+    pub update_fails_at_write: bool,
     pub fail_set_scrambling: bool,
     pub fail_stop_output: bool,
     pub fail_configure: bool,
@@ -74,7 +78,9 @@ impl TestIo {
             clock: Cell::new(0),
             fail_scdc: None,
             scdc_ok_calls: 0,
+            scdc_failures: usize::MAX,
             scdc_calls: 0,
+            update_fails_at_write: false,
             fail_set_scrambling: false,
             fail_stop_output: false,
             fail_configure: false,
@@ -101,7 +107,12 @@ impl TestIo {
         self.push(op);
         self.scdc_calls += 1;
         match self.fail_scdc {
-            Some(kind) if self.scdc_calls > self.scdc_ok_calls => Err(kind),
+            Some(kind)
+                if self.scdc_calls > self.scdc_ok_calls
+                    && self.scdc_calls - self.scdc_ok_calls <= self.scdc_failures =>
+            {
+                Err(kind)
+            }
             _ => Ok(()),
         }
     }
@@ -124,8 +135,14 @@ impl TmdsIo for TestIo {
         &mut self,
         config: SinkTmdsConfig,
     ) -> Result<(), UpdateError<DdcErrorKind>> {
-        self.scdc(Op::UpdateTmdsConfig(config))
-            .map_err(UpdateError::Read)
+        let at_write = self.update_fails_at_write;
+        self.scdc(Op::UpdateTmdsConfig(config)).map_err(|e| {
+            if at_write {
+                UpdateError::Write(e)
+            } else {
+                UpdateError::Read(e)
+            }
+        })
     }
 
     async fn read_tmds_config(&mut self) -> Result<SinkTmdsConfig, DdcErrorKind> {

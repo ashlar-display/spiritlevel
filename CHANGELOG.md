@@ -97,6 +97,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `with_tmds_config_gate`. Under `ScramblingSink`, a plain link on a sink with SCDC but no
   scrambling support gets no write: `sink_config()` is `None` exactly when no write is due,
   and is unchanged under the default.
+- **Bring-up**, `procedure::bring_up` and `TmdsLink::bring_up` (with its `_with_events`
+  form): the FRL clear and `Source_Version` on a sink with SCDC, then the output stopped, the
+  sink's `TMDS_Config` written (read-modify-write or whole byte; skipped where no write is due,
+  with `TmdsConfigSkip`), the PHY configured with its scrambler, the ratio wait spent from the
+  write, and the output started. With `OutputDuringSinkWrite::Running`, unscrambled output
+  runs through the write and the scrambler comes on after the wait. A failed `TMDS_Config`
+  write carries on as a warning under `CarryOn`, with the register read back on a plain
+  link; a missed deadline is a warning on a scrambled link. A PHY failure, a non-transient
+  SCDC error or a failed write under `Stop` ends it with `BringUpError`, after a tear-down
+  unless `tear_down_on_error` is off (with the sink taken as gone after `Detached`). Its
+  events and `MAX_BRING_UP_EVENTS`. The scrambling check and cancellation follow; until then
+  the check is `NotApplicable`.
 
 ### Changed
 

@@ -8,13 +8,26 @@
 //! events, published as a `const` ([`MAX_TEAR_DOWN_EVENTS`]), so a caller without `alloc`
 //! sizes its buffer and never drops one.
 
+use core::time::Duration;
+
 use hdmi_hal::ddc::DdcErrorKind;
+use hdmi_hal::phy::TmdsVideo;
 use hdmi_hal::time::Timestamp;
 
-use crate::config::{SinkPresence, TearDownConfig};
+use crate::config::{BringUpConfig, SinkPresence, TearDownConfig};
 use crate::outcome::{ReconnectCheck, SinkClear};
 use crate::params::TmdsLinkParams;
+use crate::types::ClockRatio;
 use crate::types::{SinkTmdsConfig, SinkTmdsFacts};
+
+/// The most events one bring-up records: its start; two each for the FRL clear and
+/// `Source_Version`; one for stopping the output; two for the sink's `TMDS_Config` (the write
+/// and a plain link's read-back); one for the PHY's configuration; two for the scrambler (off,
+/// then on, when unscrambled output runs through the write); one each for the wait, the
+/// output's start, the deadline, the scrambling check and a cancellation; the tear-down after
+/// an error or a cancellation ([`MAX_TEAR_DOWN_EVENTS`]); and its end.
+pub const MAX_BRING_UP_EVENTS: usize =
+    1 + 2 + 2 + 1 + 2 + 1 + 2 + 1 + 1 + 1 + 1 + 1 + MAX_TEAR_DOWN_EVENTS + 1;
 
 /// The most events one tear-down records: its start, one each for the sink, the scrambler
 /// and the output, and its end.
@@ -94,6 +107,56 @@ pub enum TmdsEventKind {
         /// Whether it ends the procedure; `false` when the procedure attempts its later
         /// steps anyway, as tear-down does.
         ends: bool,
+    },
+    /// A bring-up started.
+    #[non_exhaustive]
+    BringUpStarted {
+        /// The link it brings up.
+        link: TmdsLinkParams,
+        /// The video the link carries.
+        video: TmdsVideo,
+        /// Its settings.
+        config: BringUpConfig,
+    },
+    /// The sink's `TMDS_Config` was not written, and why.
+    #[non_exhaustive]
+    TmdsConfigSkipped {
+        /// The rule that skipped it.
+        reason: TmdsConfigSkip,
+    },
+    /// The PHY was configured.
+    #[non_exhaustive]
+    PhyConfigured {
+        /// The TMDS character rate, in kHz.
+        character_rate_khz: u32,
+        /// The clock ratio.
+        clock_ratio: ClockRatio,
+    },
+    /// The wait after the sink's write was spent: what was left of it once the steps since
+    /// the write had run, possibly nothing.
+    #[non_exhaustive]
+    WaitSpent {
+        /// The time waited.
+        duration: Duration,
+    },
+    /// The output was started.
+    #[non_exhaustive]
+    OutputStarted {
+        /// The time since the sink's write; `None` when it came before the write or no
+        /// write was due.
+        after_write: Option<Duration>,
+    },
+    /// Scrambled output reached the sink later after its write than the deadline allows.
+    #[non_exhaustive]
+    DeadlineMissed {
+        /// By how much.
+        by: Duration,
+    },
+    /// A bring-up ended.
+    #[non_exhaustive]
+    BringUpEnded {
+        /// The step that stopped it; `None` when the link is up.
+        failed_at: Option<TmdsStep>,
     },
     /// The sink's `Config_1` (the FRL rate) was cleared before a bring-up.
     FrlRateCleared,
@@ -183,6 +246,16 @@ pub enum TmdsStep {
     StartOutput,
     /// Stopping the output.
     StopOutput,
+}
+
+/// Why a bring-up did not write the sink's `TMDS_Config`.
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum TmdsConfigSkip {
+    /// The sink has no SCDC.
+    NoScdc,
+    /// A plain link on a sink the policy's `TmdsConfigGate` leaves unwritten.
+    Gate,
 }
 
 /// Why the FRL clear before a bring-up was skipped.

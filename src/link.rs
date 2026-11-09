@@ -7,13 +7,13 @@ use core::sync::atomic::{AtomicBool, Ordering};
 use core::task::{Context, Poll, Waker};
 use core::time::Duration;
 
-use hdmi_hal::phy::{TmdsPhy, TmdsPhyConfig};
+use hdmi_hal::phy::{TmdsPhy, TmdsPhyConfig, TmdsVideo};
 use hdmi_hal::time::{Clock, Delay, Timestamp};
 
-use crate::config::{SinkPresence, TearDownConfig};
+use crate::config::{BringUpConfig, SinkPresence, TearDownConfig};
 use crate::error::UpdateError;
 use crate::event::TmdsEvent;
-use crate::outcome::{ReconnectCheck, TearDownError, TornDown};
+use crate::outcome::{BringUpError, BringUpOutcome, ReconnectCheck, TearDownError, TornDown};
 use crate::params::TmdsLinkParams;
 use crate::procedure::{self, TmdsIo};
 use crate::scdc::TmdsScdc;
@@ -48,6 +48,12 @@ impl Cancel for &AtomicBool {
 type TearDownResult<S, P> = Result<
     TornDown<<S as TmdsScdc>::Error>,
     TearDownError<<S as TmdsScdc>::Error, <P as TmdsPhy>::Error>,
+>;
+
+/// What a bring-up returns, over the parts' error types.
+type BringUpResult<S, P> = Result<
+    BringUpOutcome<<S as TmdsScdc>::Error, <P as TmdsPhy>::Error>,
+    BringUpError<<S as TmdsScdc>::Error, <P as TmdsPhy>::Error>,
 >;
 
 /// The TMDS procedures over sync parts: the sink's SCDC, the PHY, a clock and a delay, and a
@@ -132,6 +138,42 @@ impl<S: TmdsScdc, P: TmdsPhy, K: Clock, D: Delay, X: Cancel> TmdsLink<S, P, K, D
 }
 
 impl<S: TmdsScdc, P: TmdsPhy, K: Clock, D: Delay, X: Cancel> TmdsLink<S, P, K, D, X> {
+    /// Brings up the TMDS link `link` describes, carrying `video`; see
+    /// [`procedure::bring_up`].
+    ///
+    /// # Errors
+    ///
+    /// [`BringUpError`] when a step failed in a way that stops the bring-up.
+    pub fn bring_up(
+        &mut self,
+        link: &TmdsLinkParams,
+        video: TmdsVideo,
+        config: &BringUpConfig,
+    ) -> BringUpResult<S, P> {
+        self.bring_up_with_events(link, video, config, &mut |_| {})
+    }
+
+    /// [`bring_up`](Self::bring_up), calling `record` with each event.
+    ///
+    /// # Errors
+    ///
+    /// As [`bring_up`](Self::bring_up).
+    pub fn bring_up_with_events(
+        &mut self,
+        link: &TmdsLinkParams,
+        video: TmdsVideo,
+        config: &BringUpConfig,
+        record: &mut impl FnMut(TmdsEvent),
+    ) -> BringUpResult<S, P> {
+        block_on(procedure::bring_up(
+            &mut SyncIo(self),
+            link,
+            video,
+            config,
+            record,
+        ))
+    }
+
     /// Checks whether the sink still holds the `TMDS_Config` `link` needs; see
     /// [`procedure::check_reconnect`].
     pub fn check_reconnect(
@@ -402,6 +444,37 @@ mod tests {
         assert_eq!(sink.tmds_config, 0);
         assert!(!phy.output && !phy.scrambling);
         assert_eq!(phy.configured, None);
+    }
+
+    #[test]
+    fn bring_up_runs_over_the_parts() {
+        let time = SimTime::default();
+        let mut link = TmdsLink::new(Sink::default(), Phy::default(), &time, &time);
+        let params = scrambled();
+        let video = hdmi_hal::phy::TmdsVideo::new(
+            594_000,
+            hdmi_hal::ColorBitDepth::Depth8,
+            hdmi_hal::ColorFormat::Rgb444,
+        );
+        let config = BringUpConfig::DEFAULT;
+        assert!(matches!(
+            link.bring_up(&params, video, &config),
+            Ok(BringUpOutcome::Up(_))
+        ));
+        let mut events = 0;
+        assert!(
+            link.bring_up_with_events(&params, video, &config, &mut |_| events += 1)
+                .is_ok()
+        );
+        assert!(events > 0 && events <= crate::MAX_BRING_UP_EVENTS);
+        let (sink, phy, ..) = link.into_parts();
+        assert_eq!(sink.tmds_config, 0x03);
+        assert_eq!(sink.source_version, 1);
+        assert!(phy.output && phy.scrambling);
+        assert_eq!(
+            phy.configured.map(|c| c.clock_ratio),
+            Some(crate::ClockRatio::Div40)
+        );
     }
 
     #[test]
