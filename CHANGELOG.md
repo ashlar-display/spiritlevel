@@ -105,8 +105,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   write, and the output started. With `OutputDuringSinkWrite::Running`, unscrambled output
   runs through the write and the scrambler comes on after the wait. A failed `TMDS_Config`
   write carries on as a warning under `CarryOn`, with the register read back on a plain
-  link; a missed deadline is a warning on a scrambled link. A PHY failure, a non-transient
-  SCDC error or a failed write under `Stop` ends it with `BringUpError`, after a tear-down
+  link; a missed deadline is a warning on a scrambled link; a failed FRL clear,
+  `Sink_Version` or `Source_Version` is a warning whatever the error's kind. A PHY failure,
+  a non-transient error of the `TMDS_Config` write or a failed write under `Stop` ends it
+  with `BringUpError`, after a tear-down
   unless `tear_down_on_error` is off (with the sink taken as gone after `Detached`). Its
   events and `MAX_BRING_UP_EVENTS`.
 - **The scrambling check in bring-up**: on a scrambled link, `Scrambling_Status` polled

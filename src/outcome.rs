@@ -136,8 +136,9 @@ impl<S> Warnings<S> {
 #[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BringUpError<S, P> {
-    /// A sink write or read failed with a non-transient error (`Detached`, `Unsupported`),
-    /// or a `TMDS_Config` write failed under `OnTmdsConfigFailure::Stop`.
+    /// The sink's `TMDS_Config` write failed with a non-transient error (`Detached`,
+    /// `Unsupported`), or at all under `OnTmdsConfigFailure::Stop`. The work before both
+    /// paths and a plain link's read-back only warn.
     #[non_exhaustive]
     Scdc {
         /// The step that failed.

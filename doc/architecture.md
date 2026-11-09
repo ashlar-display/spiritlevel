@@ -222,9 +222,11 @@ gets neither.
    lineage, dw-hdmi: only on a scrambled link) or `Never` (for a sink that misbehaves).
 
 Both come before the `TMDS_Config` write, as in every source that does them [22]; the order
-between them is amdgpu's, the one source that does both. A failed write here is a warning and
-the bring-up carries on: neither source can see the result of its FRL clear [27], and no
-source treats `Source_Version` as fatal.
+between them is amdgpu's, the one source that does both. A failed step here is a warning
+and the bring-up carries on, whatever the error's kind: neither source can see the result of
+its FRL clear [27], and no source treats `Source_Version` as fatal. A bus that is gone
+(`Detached`) fails the `TMDS_Config` write that follows, which stops the bring-up there; a
+request the SCDC implementation cannot do (`Unsupported`) does not block the link.
 
 ### Bring-up
 
@@ -325,8 +327,8 @@ of it, and repeating the bring-up later is the caller's.
   a failed FRL clear (`Config_1` or `FLT_update`), `Sink_Version` read or `Source_Version`
   write, a failed `TMDS_Config` write under `CarryOn`, and a missed deadline.
 - **`BringUpError`** when a step failed in a way that stops the bring-up: a PHY call (output
-  off, configure, scrambler, output on), an SCDC call with a non-transient error, or a
-  `TMDS_Config` write under `Stop`. It names the step, the error, whether the output may be
+  off, configure, scrambler, output on), or the sink's `TMDS_Config` write with a
+  non-transient error or under `Stop`. It names the step, the error, whether the output may be
   running, and the warnings gathered.
 - **After an error, a tear-down**, with the caller's `TearDownConfig`, and its result in the
   error (`Cleanup`); with the sink taken to be gone after `Detached`. `tear_down_on_error:

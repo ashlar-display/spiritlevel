@@ -38,7 +38,7 @@ pub(crate) fn transient(kind: DdcErrorKind) -> bool {
     !matches!(kind, DdcErrorKind::Detached | DdcErrorKind::Unsupported)
 }
 
-/// A failed SCDC step: a warning to carry on with, or the stop.
+/// A failed SCDC step before both paths: a warning, whatever the error's kind.
 fn failed<Io: TmdsIo>(
     io: &Io,
     emit: &mut impl FnMut(&Io, TmdsEventKind),
@@ -46,16 +46,17 @@ fn failed<Io: TmdsIo>(
     error: Io::ScdcError,
     warning: impl FnOnce(Io::ScdcError) -> BringUpWarning<Io::ScdcError>,
     warnings: &mut Warnings<Io::ScdcError>,
-) -> Result<(), Stop<Io::ScdcError>> {
+) {
     let kind = error.kind();
-    let ends = !transient(kind);
-    emit(io, TmdsEventKind::ScdcStepFailed { step, kind, ends });
-    if ends {
-        Err(Stop { step, error })
-    } else {
-        warnings.push(warning(error));
-        Ok(())
-    }
+    emit(
+        io,
+        TmdsEventKind::ScdcStepFailed {
+            step,
+            kind,
+            ends: false,
+        },
+    );
+    warnings.push(warning(error));
 }
 
 /// Why the work before both paths or the sink's write ended early: a step's stop, or the
@@ -95,8 +96,10 @@ fn checkpoint<Io: TmdsIo>(io: &Io, at: CancelPoint) -> Result<(), CancelPoint> {
 
 /// The work before both paths, in order: the FRL clear (`Config_1`, then `FLT_update`) when
 /// the settings give it, then `Source_Version`. Nothing on a sink without SCDC. A failed
-/// write is a warning; a non-transient error stops the bring-up. The cancel flag is read
-/// before each step.
+/// step is a warning whatever the error's kind, as no source treats one as fatal: a bus
+/// that is gone (`Detached`) fails the `TMDS_Config` write that follows, which stops the
+/// bring-up, and a request the implementation cannot do (`Unsupported`) does not block the
+/// link. The cancel flag is read before each step.
 pub(crate) async fn before_both_paths<Io: TmdsIo>(
     io: &mut Io,
     link: &TmdsLinkParams,
@@ -125,7 +128,7 @@ pub(crate) async fn before_both_paths<Io: TmdsIo>(
                     e,
                     BringUpWarning::FrlRateClearFailed,
                     warnings,
-                )?,
+                ),
             }
             checkpoint(io, CancelPoint::Step(TmdsStep::ClearFltUpdate))?;
             match io.clear_flt_update().await {
@@ -137,7 +140,7 @@ pub(crate) async fn before_both_paths<Io: TmdsIo>(
                     e.into_inner(),
                     BringUpWarning::FltUpdateClearFailed,
                     warnings,
-                )?,
+                ),
             }
         }
     }
@@ -172,7 +175,7 @@ pub(crate) async fn before_both_paths<Io: TmdsIo>(
                     e,
                     BringUpWarning::SinkVersionReadFailed,
                     warnings,
-                )?;
+                );
                 emit(io, skip(SourceVersionSkip::SinkVersionUnread));
                 return Ok(());
             }
@@ -197,7 +200,7 @@ pub(crate) async fn before_both_paths<Io: TmdsIo>(
             e,
             BringUpWarning::SourceVersionWriteFailed,
             warnings,
-        )?,
+        ),
     }
     Ok(())
 }
@@ -585,8 +588,9 @@ fn deadline<Io: TmdsIo, F: FnMut(TmdsEvent)>(
 ///
 /// # Errors
 ///
-/// [`BringUpError`] when a PHY call failed, a sink write or read failed with a
-/// non-transient error, or a `TMDS_Config` write failed under `OnTmdsConfigFailure::Stop`.
+/// [`BringUpError`] when a PHY call failed, or the sink's `TMDS_Config` write failed with a
+/// non-transient error (`Detached`, `Unsupported`) or under `OnTmdsConfigFailure::Stop`. A
+/// failure before both paths, or of a plain link's read-back, is a warning.
 /// With `tear_down_on_error` (the default) a tear-down follows, with the sink taken to be
 /// gone when the error was `Detached`; its result is the error's [`Cleanup`].
 pub async fn bring_up<Io: TmdsIo, F: FnMut(TmdsEvent)>(
@@ -943,28 +947,24 @@ mod tests {
     }
 
     #[test]
-    fn a_non_transient_error_stops_at_its_step() {
-        for (ok_calls, step) in [
-            (0, TmdsStep::ClearFrlRate),
-            (1, TmdsStep::ClearFltUpdate),
-            (2, TmdsStep::SourceVersion),
+    fn a_non_transient_error_is_a_warning_too() {
+        for (ok_calls, step, warnings) in [
+            (0, TmdsStep::ClearFrlRate, 3),
+            (1, TmdsStep::ClearFltUpdate, 2),
+            (2, TmdsStep::SourceVersion, 1),
         ] {
             let mut io = TestIo::new();
             io.fail_scdc = Some(DdcErrorKind::Detached);
             io.scdc_ok_calls = ok_calls;
             let r = run(&mut io, &link(594_000, FRL_SINK), &BringUpConfig::DEFAULT);
-            assert_eq!(
-                r.result,
-                Err(Halt::Stop(Stop {
-                    step,
-                    error: DdcErrorKind::Detached
-                }))
-            );
-            assert_eq!(io.ops().len(), ok_calls + 1);
+            assert_eq!(r.result, Ok(()));
+            // Every step is still attempted, and each failure is a warning.
+            assert_eq!(io.ops().len(), 3);
+            assert_eq!(r.warnings.len(), warnings);
             assert!(r.has(TmdsEventKind::ScdcStepFailed {
                 step,
                 kind: DdcErrorKind::Detached,
-                ends: true
+                ends: false
             }));
         }
         let mut io = TestIo::new();
@@ -974,13 +974,16 @@ mod tests {
             &link(594_000, NO_FRL),
             &BringUpConfig::DEFAULT.with_source_version(SourceVersionWrite::IfSinkVersion1),
         );
-        assert_eq!(
-            r.result,
-            Err(Halt::Stop(Stop {
-                step: TmdsStep::SinkVersion,
-                error: DdcErrorKind::Unsupported
-            }))
-        );
+        assert_eq!(r.result, Ok(()));
+        assert!(matches!(
+            r.warnings.iter().next(),
+            Some(BringUpWarning::SinkVersionReadFailed(
+                DdcErrorKind::Unsupported
+            ))
+        ));
+        assert!(r.has(TmdsEventKind::SourceVersionSkipped {
+            reason: SourceVersionSkip::SinkVersionUnread
+        }));
     }
 
     #[test]
@@ -1429,7 +1432,7 @@ mod tests {
     }
 
     #[test]
-    fn an_early_stop_keeps_the_warnings_and_leaves_the_output_unknown() {
+    fn warnings_before_both_paths_are_kept_until_the_write_stops() {
         let mut io = TestIo::new();
         io.fail_scdc = Some(DdcErrorKind::Busy);
         io.scdc_failures = 1; // the FRL rate clear: a warning
@@ -1448,13 +1451,15 @@ mod tests {
         let mut io = TestIo::new();
         io.fail_scdc = Some(DdcErrorKind::Unsupported);
         let r = up(&mut io, &link(594_000, FRL_SINK), &BringUpConfig::DEFAULT);
+        // The work before both paths only warns; the sink's write stops the bring-up.
         assert!(matches!(
             r.result,
             Err(BringUpError::Scdc {
-                step: TmdsStep::ClearFrlRate,
-                output: OutputState::MayBeRunning,
+                step: TmdsStep::WriteTmdsConfig,
+                output: OutputState::Stopped,
+                warnings,
                 ..
-            })
+            }) if warnings.len() == 3
         ));
     }
 
