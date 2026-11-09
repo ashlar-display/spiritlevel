@@ -189,6 +189,23 @@ mod tests {
     }
 
     #[test]
+    fn unsupported_ends_it_at_once_and_some_failed_reads_are_not_unreadable() {
+        let mut io = TestIo::new();
+        io.fail_scdc = Some(DdcErrorKind::Unsupported);
+        let (check, _) = run(&mut io);
+        assert_eq!((check.result, check.reads), (CheckResult::Unreadable, 1));
+
+        // Two failed reads, then a sink that answers but never reports scrambling.
+        let mut io = TestIo::new();
+        io.fail_scdc = Some(DdcErrorKind::Busy);
+        io.scdc_failures = 2;
+        let (check, _) = run(&mut io);
+        assert_eq!(check.result, CheckResult::NotSet);
+        assert_eq!(check.failed_reads, 2);
+        assert!(check.reads > 2);
+    }
+
+    #[test]
     fn a_frozen_clock_ends_the_check_on_its_read_count() {
         let mut io = TestIo::new();
         io.frozen_clock = true;
