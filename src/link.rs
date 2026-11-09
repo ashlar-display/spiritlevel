@@ -109,6 +109,33 @@ impl<S: TmdsScdc, P: TmdsPhy, K: Clock, D: Delay, X: Cancel> TmdsLink<S, P, K, D
         (self.scdc, self.phy, self.clock, self.delay, self.cancel)
     }
 
+    /// The SCDC client.
+    pub fn scdc(&self) -> &S {
+        &self.scdc
+    }
+
+    /// The SCDC client, mutably: between procedures, for reads of the caller's own.
+    pub fn scdc_mut(&mut self) -> &mut S {
+        &mut self.scdc
+    }
+
+    /// The PHY.
+    pub fn phy(&self) -> &P {
+        &self.phy
+    }
+
+    /// The PHY, mutably: between procedures, to power it on or off, read its capabilities, or
+    /// drive it in another mode.
+    pub fn phy_mut(&mut self) -> &mut P {
+        &mut self.phy
+    }
+
+    /// The clock the procedures stamp their events from, so a caller can stamp its own on
+    /// the same timebase.
+    pub fn clock(&self) -> &K {
+        &self.clock
+    }
+
     /// Stops the TMDS link `link` describes; see [`procedure::tear_down`].
     ///
     /// # Errors
@@ -561,6 +588,17 @@ mod tests {
         let (sink, phy, ..) = link.into_parts();
         assert_eq!(sink.tmds_config, 0x03);
         assert!(phy.scrambling);
+    }
+
+    #[test]
+    fn the_parts_are_reachable_between_procedures() {
+        let time = SimTime::default();
+        let mut link = TmdsLink::new(Sink::default(), Phy::default(), &time, &time);
+        link.scdc_mut().source_version = 7;
+        link.phy_mut().output = true;
+        assert_eq!(link.scdc().source_version, 7);
+        assert!(link.phy().output);
+        assert_eq!(link.clock().now(), Timestamp::from_micros(0));
     }
 
     #[test]

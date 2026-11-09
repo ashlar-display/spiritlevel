@@ -76,7 +76,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (one value can serve as both through a reference), with `tear_down` and
   `tear_down_with_events`: the procedure runs to completion before the call returns, with
   no runtime. A cancel flag through the `Cancel` trait, implemented for `&AtomicBool`, with
-  `NoCancel` the default (`with_cancel`); `into_parts` gives the parts back.
+  `NoCancel` the default (`with_cancel`); `into_parts` gives the parts back, and `scdc`,
+  `scdc_mut`, `phy`, `phy_mut` and `clock` reach them between procedures (to power the PHY,
+  read its capabilities or stamp the caller's own events).
 - **The reconnect check**, `procedure::check_reconnect` and `TmdsLink::check_reconnect`
   (with its `_with_events` form): after a hotplug while the link is up, one read of the
   sink's `TMDS_Config`, compared with what the link needs on both bits, a plain link

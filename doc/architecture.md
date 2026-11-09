@@ -857,6 +857,7 @@ impl<S: TmdsScdc, P: TmdsPhy, K: Clock, D: Delay, X: Cancel> TmdsLink<S, P, K, D
     // bring_up_with_events, tear_down(_with_events), check_reconnect(_with_events),
     // quick_restore(_with_events)
     pub fn into_parts(self) -> (S, P, K, D, X);
+    // scdc, scdc_mut, phy, phy_mut, clock: the parts between procedures
 }
 
 pub trait Cancel { fn is_cancelled(&self) -> bool; }   // for &AtomicBool and NoCancel
