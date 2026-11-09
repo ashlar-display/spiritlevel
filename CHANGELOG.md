@@ -156,6 +156,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Internal
 
+- CI and the publish workflow's verify job also run the `culvert` adapter's tests and build
+  the docs with every feature, as docs.rs does; the MSRV check and the coverage measurement
+  include the `culvert` feature.
 - CI fails on `main`, and the publish workflow before anything is built, when `Cargo.toml`
   has a `[patch]` section: `cargo package` drops it, so a release built with one would not
   build from crates.io.

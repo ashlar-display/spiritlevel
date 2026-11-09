@@ -99,13 +99,14 @@ jobs:
       - name: Clippy (no default features)
         run: cargo clippy --locked --all-targets --no-default-features -- -D warnings
 
+      # docs.rs builds with every feature, so the docs are checked the same way.
       - name: Docs
-        run: cargo rustdoc --locked -- -D warnings
+        run: cargo rustdoc --locked --all-features -- -D warnings
 
       - name: Test
         run: cargo test --locked
 
-      # Without display-types: the crate has no dependencies, and the From impls are gone.
+      # Without display-types' From impls (display-types itself still comes through hdmi-hal).
       - name: Test (no default features)
         run: cargo test --locked --no-default-features
 
@@ -118,6 +119,9 @@ jobs:
       # The culvert feature: the adapter implementing the SCDC trait for culvert's client.
       - name: Clippy (culvert)
         run: cargo clippy --locked --all-targets --features culvert -- -D warnings
+
+      - name: Test (culvert)
+        run: cargo test --locked --features culvert
 
       - name: Build (no_std, culvert)
         run: cargo build --locked --features culvert --target thumbv7em-none-eabi
@@ -161,6 +165,9 @@ jobs:
 
       - name: Verify MSRV (test, no default features)
         run: cargo msrv verify --output-format minimal -- cargo test --locked --no-default-features
+
+      - name: Verify MSRV (test, culvert)
+        run: cargo msrv verify --output-format minimal -- cargo test --locked --features culvert
 
       - name: Verify MSRV (no_std, no default features)
         run: >
