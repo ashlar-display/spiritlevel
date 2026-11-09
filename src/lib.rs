@@ -18,6 +18,7 @@
 #![forbid(unsafe_code)]
 #![deny(missing_docs)]
 
+mod config;
 #[cfg(feature = "culvert")]
 mod culvert;
 mod error;
@@ -30,6 +31,10 @@ mod types;
 #[doc = include_str!("../README.md")]
 struct ReadmeDoctests;
 
+pub use config::{
+    BringUpConfig, ClearFrl, OnTmdsConfigFailure, OutputDuringSinkWrite, ScramblerOff,
+    SinkClearTiming, SinkPresence, SourceVersionWrite, TearDownConfig, TmdsConfigWrite,
+};
 pub use error::{ParamsError, UpdateError};
 pub use params::{ScramblingDecision, ScramblingOff, TmdsLinkParams};
 pub use scdc::TmdsScdc;

@@ -46,6 +46,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   keeps the reserved bits through culvert's own read-modify-write, and the raw bytes of
   `TMDS_Config` and `Scrambling_Status` reach `SinkTmdsConfig::raw` and
   `ScramblingStatus::raw`.
+- **The procedures' settings**, ahead of the procedures: `BringUpConfig` (the ratio wait,
+  the scrambling deadline, the check's window and interval, and the settings
+  `ClearFrl`, `SourceVersionWrite`, `OutputDuringSinkWrite`, `TmdsConfigWrite`,
+  `OnTmdsConfigFailure`, `tear_down_on_error` and its `TearDownConfig`), `TearDownConfig`
+  (`clear_sink`, `SinkClearTiming`, `ScramblerOff`) and `SinkPresence`. Each has a
+  `DEFAULT` and `const fn` setters.
 
 ### Changed
 
