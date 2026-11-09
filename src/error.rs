@@ -1,4 +1,5 @@
-//! The error `TmdsLinkParams::choose` returns: `ParamsError`.
+//! The errors: `ParamsError`, which `TmdsLinkParams::choose` returns, and `UpdateError`,
+//! for an SCDC operation made of a read and a write.
 
 use core::fmt;
 
@@ -69,6 +70,43 @@ impl fmt::Display for ParamsError {
 }
 
 impl core::error::Error for ParamsError {}
+
+/// The error of an SCDC operation made of a read and a write, saying which of them failed:
+/// a read-modify-write of `TMDS_Config`, or the clear of `FLT_update`.
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum UpdateError<E> {
+    /// The read failed; nothing was written.
+    Read(E),
+    /// The read succeeded and the write failed; whether the sink took the write is unknown.
+    Write(E),
+}
+
+impl<E> UpdateError<E> {
+    /// The underlying error, whichever transfer it came from.
+    pub fn into_inner(self) -> E {
+        match self {
+            Self::Read(e) | Self::Write(e) => e,
+        }
+    }
+}
+
+impl<E: fmt::Display> fmt::Display for UpdateError<E> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Read(e) => write!(f, "read failed, nothing written: {e}"),
+            Self::Write(e) => write!(f, "write failed after the read: {e}"),
+        }
+    }
+}
+
+impl<E: core::error::Error + 'static> core::error::Error for UpdateError<E> {
+    fn source(&self) -> Option<&(dyn core::error::Error + 'static)> {
+        match self {
+            Self::Read(e) | Self::Write(e) => Some(e),
+        }
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -173,5 +211,53 @@ mod tests {
             text(&message(594_000, false, false)),
             "TMDS character rate 594000 kHz needs scrambling, but the sink cannot take it"
         );
+    }
+
+    fn render_any(e: impl fmt::Display) -> Buf {
+        let mut buf = Buf {
+            bytes: [0; 160],
+            len: 0,
+        };
+        fmt::Write::write_fmt(&mut buf, format_args!("{e}")).unwrap();
+        buf
+    }
+
+    #[test]
+    fn update_error_says_which_transfer_failed() {
+        assert_eq!(UpdateError::Read(1).into_inner(), 1);
+        assert_eq!(UpdateError::Write(2).into_inner(), 2);
+        assert_eq!(
+            text(&render_any(UpdateError::Read(
+                ParamsError::AboveSourceMaximum {
+                    rate_khz: 1,
+                    max_khz: 0,
+                }
+            ))),
+            "read failed, nothing written: TMDS character rate 1 kHz is above the source's \
+             maximum of 0 kHz"
+        );
+        assert_eq!(
+            text(&render_any(UpdateError::Write(
+                ParamsError::AboveSourceMaximum {
+                    rate_khz: 1,
+                    max_khz: 0,
+                }
+            ))),
+            "write failed after the read: TMDS character rate 1 kHz is above the source's \
+             maximum of 0 kHz"
+        );
+    }
+
+    #[test]
+    fn update_error_sources_the_inner_error() {
+        use core::error::Error;
+        let inner = ParamsError::AboveSourceMaximum {
+            rate_khz: 1,
+            max_khz: 0,
+        };
+        for e in [UpdateError::Read(inner), UpdateError::Write(inner)] {
+            let source = e.source().unwrap().downcast_ref::<ParamsError>();
+            assert_eq!(source, Some(&inner));
+        }
     }
 }

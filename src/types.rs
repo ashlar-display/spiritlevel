@@ -1,5 +1,7 @@
 //! The inputs and register contents: `ClockRatio`, `ScramblingThreshold`, `SinkTmdsFacts`,
-//! `SourceTmdsFacts`, `TmdsPolicy` and `SinkTmdsConfig`.
+//! `SourceTmdsFacts`, `TmdsPolicy`, `SinkTmdsConfig` and `ScramblingStatus`.
+
+use core::hash::{Hash, Hasher};
 
 /// The TMDS bit clock ratio, hdmi-hal's `TmdsClockRatio`: the TMDS clock runs at the bit
 /// rate divided by 10 or by 40. One type, so the link parameters pass straight to
@@ -183,24 +185,90 @@ impl Default for TmdsPolicy {
 /// The two fields of the sink's `TMDS_Config` (SCDC offset 0x20): what is written, and
 /// what a read returns.
 ///
-/// The bit layout belongs to the SCDC implementation.
+/// The bit layout belongs to the SCDC implementation. A value that came from a read keeps
+/// the byte it was decoded from ([`raw`](Self::raw)), so a sink that sets reserved bits
+/// stays visible to a diagnostic tool. The byte is diagnostic only: equality and hashing
+/// compare the two fields, so a value read back equals the one that was written.
 #[non_exhaustive]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy)]
 pub struct SinkTmdsConfig {
     /// `Scrambling_Enable`.
     pub scrambling_enable: bool,
     /// `TMDS_Bit_Clock_Ratio`: set for 1/40, clear for 1/10.
     pub high_tmds_clock_ratio: bool,
+    raw: Option<u8>,
 }
 
 impl SinkTmdsConfig {
-    /// The register's contents.
+    /// The register's contents, as the caller builds them: no byte read.
     #[must_use]
     pub const fn new(scrambling_enable: bool, high_tmds_clock_ratio: bool) -> Self {
         Self {
             scrambling_enable,
             high_tmds_clock_ratio,
+            raw: None,
         }
+    }
+
+    /// The register's contents as an SCDC implementation decoded them from `raw`, the
+    /// byte it read.
+    #[must_use]
+    pub const fn from_read(scrambling_enable: bool, high_tmds_clock_ratio: bool, raw: u8) -> Self {
+        Self {
+            scrambling_enable,
+            high_tmds_clock_ratio,
+            raw: Some(raw),
+        }
+    }
+
+    /// The byte this value was decoded from, or `None` for one the caller built.
+    #[must_use]
+    pub const fn raw(&self) -> Option<u8> {
+        self.raw
+    }
+}
+
+impl PartialEq for SinkTmdsConfig {
+    fn eq(&self, other: &Self) -> bool {
+        self.scrambling_enable == other.scrambling_enable
+            && self.high_tmds_clock_ratio == other.high_tmds_clock_ratio
+    }
+}
+
+impl Eq for SinkTmdsConfig {}
+
+impl Hash for SinkTmdsConfig {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.scrambling_enable.hash(state);
+        self.high_tmds_clock_ratio.hash(state);
+    }
+}
+
+/// What the sink reports in `Scrambling_Status` (SCDC offset 0x21): whether it detects
+/// scrambled TMDS, and the byte that was read.
+///
+/// The byte keeps whatever the sink reports beside the status bit, so noise or reserved
+/// bits stay visible to a diagnostic tool; the bit layout belongs to the SCDC
+/// implementation.
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct ScramblingStatus {
+    /// The sink detects scrambled TMDS.
+    pub set: bool,
+    raw: u8,
+}
+
+impl ScramblingStatus {
+    /// The status as an SCDC implementation decoded it from `raw`, the byte it read.
+    #[must_use]
+    pub const fn new(set: bool, raw: u8) -> Self {
+        Self { set, raw }
+    }
+
+    /// The byte that was read.
+    #[must_use]
+    pub const fn raw(&self) -> u8 {
+        self.raw
     }
 }
 
@@ -252,6 +320,33 @@ mod tests {
     }
 
     #[test]
+    fn sink_config_keeps_the_byte_read_without_comparing_it() {
+        let built = SinkTmdsConfig::new(true, true);
+        let read = SinkTmdsConfig::from_read(true, true, 0xA3);
+        assert_eq!(built.raw(), None);
+        assert_eq!(read.raw(), Some(0xA3));
+        assert_eq!(read, built);
+        assert_ne!(read, SinkTmdsConfig::from_read(true, false, 0xA3));
+
+        extern crate std;
+        use std::collections::hash_map::DefaultHasher;
+        let hash = |c: &SinkTmdsConfig| {
+            let mut h = DefaultHasher::new();
+            c.hash(&mut h);
+            h.finish()
+        };
+        assert_eq!(hash(&read), hash(&built));
+    }
+
+    #[test]
+    fn scrambling_status_keeps_the_byte() {
+        const STATUS: ScramblingStatus = ScramblingStatus::new(true, 0x81);
+        const { assert!(STATUS.set) };
+        assert_eq!(STATUS.raw(), 0x81);
+        assert_ne!(STATUS, ScramblingStatus::new(true, 0x01));
+    }
+
+    #[test]
     fn constructors_are_const() {
         const SINK: SinkTmdsFacts = SinkTmdsFacts::new(true, true, true);
         const SOURCE: SourceTmdsFacts = SourceTmdsFacts::new(false);
@@ -259,6 +354,8 @@ mod tests {
             .with_low_rate_scrambling(false)
             .with_threshold(ScramblingThreshold::AtOrAbove340);
         const CONFIG: SinkTmdsConfig = SinkTmdsConfig::new(false, true);
+        const READ: SinkTmdsConfig = SinkTmdsConfig::from_read(false, true, 0x02);
+        const { assert!(READ.high_tmds_clock_ratio) };
         const { assert!(SINK.scdc_present && !SOURCE.low_rate_scrambling) };
         const { assert!(!POLICY.low_rate_scrambling && CONFIG.high_tmds_clock_ratio) };
     }

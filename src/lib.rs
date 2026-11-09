@@ -24,8 +24,9 @@ mod types;
 #[doc = include_str!("../README.md")]
 struct ReadmeDoctests;
 
-pub use error::ParamsError;
+pub use error::{ParamsError, UpdateError};
 pub use params::{ScramblingDecision, ScramblingOff, TmdsLinkParams};
 pub use types::{
-    ClockRatio, ScramblingThreshold, SinkTmdsConfig, SinkTmdsFacts, SourceTmdsFacts, TmdsPolicy,
+    ClockRatio, ScramblingStatus, ScramblingThreshold, SinkTmdsConfig, SinkTmdsFacts,
+    SourceTmdsFacts, TmdsPolicy,
 };
