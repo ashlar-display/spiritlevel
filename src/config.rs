@@ -5,6 +5,7 @@
 //! majority's as the default or, where there is no majority, a chosen one; the architecture
 //! document cites the sources behind each.
 
+use core::fmt;
 use core::time::Duration;
 
 /// Bring-up and quick-restore settings.
@@ -58,6 +59,28 @@ impl BringUpConfig {
         tear_down_on_error: true,
         tear_down: TearDownConfig::DEFAULT,
     };
+
+    /// Checks the timings for combinations that defeat their purpose; the procedures run
+    /// with any values.
+    ///
+    /// # Errors
+    ///
+    /// [`ConfigError`] with every problem found: a scrambling deadline shorter than the ratio
+    /// wait, which counts towards it, so every bring-up warns; a check interval longer than
+    /// the check window, so the check reads once.
+    pub const fn validate(&self) -> Result<(), ConfigError> {
+        let error = ConfigError {
+            deadline_shorter_than_wait: self.scrambling_deadline.as_nanos()
+                < self.ratio_wait.as_nanos(),
+            interval_longer_than_window: self.check_interval.as_nanos()
+                > self.check_window.as_nanos(),
+        };
+        if error.deadline_shorter_than_wait || error.interval_longer_than_window {
+            Err(error)
+        } else {
+            Ok(())
+        }
+    }
 
     /// Sets [`ratio_wait`](Self::ratio_wait).
     #[must_use]
@@ -148,6 +171,36 @@ impl Default for BringUpConfig {
         Self::DEFAULT
     }
 }
+
+/// What [`BringUpConfig::validate`] found: every problem, at least one.
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct ConfigError {
+    /// The scrambling deadline is shorter than the ratio wait, which counts towards it: every
+    /// bring-up would miss it.
+    pub deadline_shorter_than_wait: bool,
+    /// The check interval is longer than the check window: the check would read once.
+    pub interval_longer_than_window: bool,
+}
+
+impl fmt::Display for ConfigError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match (
+            self.deadline_shorter_than_wait,
+            self.interval_longer_than_window,
+        ) {
+            (true, true) => f.write_str(
+                "the scrambling deadline is shorter than the ratio wait, and the check \
+                 interval is longer than the check window",
+            ),
+            (true, false) => f.write_str("the scrambling deadline is shorter than the ratio wait"),
+            (false, true) => f.write_str("the check interval is longer than the check window"),
+            (false, false) => f.write_str("the bring-up settings are inconsistent"),
+        }
+    }
+}
+
+impl core::error::Error for ConfigError {}
 
 /// Whether the output is stopped while the sink's `TMDS_Config` is written.
 #[non_exhaustive]
@@ -408,6 +461,45 @@ mod tests {
                 ..BringUpConfig::DEFAULT
             }
         );
+    }
+
+    #[test]
+    fn validate_reports_every_problem() {
+        const { assert!(BringUpConfig::DEFAULT.validate().is_ok()) };
+        let late = BringUpConfig::DEFAULT
+            .with_ratio_wait(Duration::from_millis(100))
+            .with_scrambling_deadline(Duration::from_millis(50));
+        assert_eq!(
+            late.validate(),
+            Err(ConfigError {
+                deadline_shorter_than_wait: true,
+                interval_longer_than_window: false,
+            })
+        );
+        let both = late.with_check_interval(Duration::from_millis(300));
+        let error = both.validate().unwrap_err();
+        assert!(error.deadline_shorter_than_wait && error.interval_longer_than_window);
+
+        extern crate std;
+        use std::string::ToString;
+        assert_eq!(
+            late.validate().unwrap_err().to_string(),
+            "the scrambling deadline is shorter than the ratio wait"
+        );
+        assert_eq!(
+            BringUpConfig::DEFAULT
+                .with_check_interval(Duration::from_secs(1))
+                .validate()
+                .unwrap_err()
+                .to_string(),
+            "the check interval is longer than the check window"
+        );
+        assert!(error.to_string().contains(", and the check"));
+        let none = ConfigError {
+            deadline_shorter_than_wait: false,
+            interval_longer_than_window: false,
+        };
+        assert_eq!(none.to_string(), "the bring-up settings are inconsistent");
     }
 
     #[test]

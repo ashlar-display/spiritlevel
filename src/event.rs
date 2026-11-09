@@ -152,6 +152,12 @@ pub enum TmdsEventKind {
         /// By how much.
         by: Duration,
     },
+    /// The scrambling check ended: one event per window, not per read.
+    #[non_exhaustive]
+    ScramblingChecked {
+        /// What it found, with the first error's kind in place of the error.
+        check: crate::outcome::ScramblingCheck<DdcErrorKind>,
+    },
     /// A bring-up ended.
     #[non_exhaustive]
     BringUpEnded {

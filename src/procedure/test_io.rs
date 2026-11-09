@@ -44,7 +44,7 @@ pub enum Op {
     Delay(Duration),
 }
 
-const LOG_LEN: usize = 64;
+const LOG_LEN: usize = 512;
 
 pub struct TestIo {
     log: [Op; LOG_LEN],
@@ -68,6 +68,11 @@ pub struct TestIo {
     pub sink_version: u8,
     pub flt_update: bool,
     pub cancelled: bool,
+    /// `Scrambling_Status` reads as set from this read on (1-based), overriding the register.
+    pub status_set_from_read: Option<u32>,
+    status_reads: u32,
+    /// The clock does not advance: neither on a read nor on a delay.
+    pub frozen_clock: bool,
 }
 
 impl TestIo {
@@ -90,6 +95,9 @@ impl TestIo {
             sink_version: 1,
             flt_update: false,
             cancelled: false,
+            status_set_from_read: None,
+            status_reads: 0,
+            frozen_clock: false,
         }
     }
 
@@ -153,10 +161,13 @@ impl TmdsIo for TestIo {
 
     async fn read_scrambling_status(&mut self) -> Result<ScramblingStatus, DdcErrorKind> {
         self.scdc(Op::ReadScramblingStatus)?;
-        Ok(ScramblingStatus::new(
-            self.scrambling_status & 1 != 0,
-            self.scrambling_status,
-        ))
+        self.status_reads += 1;
+        let raw = match self.status_set_from_read {
+            Some(from) if self.status_reads >= from => 0x01,
+            Some(_) => 0x00,
+            None => self.scrambling_status,
+        };
+        Ok(ScramblingStatus::new(raw & 1 != 0, raw))
     }
 
     async fn read_sink_version(&mut self) -> Result<u8, DdcErrorKind> {
@@ -197,15 +208,18 @@ impl TmdsIo for TestIo {
     }
 
     fn now(&self) -> Timestamp {
-        let now = self.clock.get() + 1;
-        self.clock.set(now);
-        Timestamp::from_micros(now)
+        if !self.frozen_clock {
+            self.clock.set(self.clock.get() + 1);
+        }
+        Timestamp::from_micros(self.clock.get())
     }
 
     async fn delay(&mut self, duration: Duration) {
         self.push(Op::Delay(duration));
-        let micros = u64::try_from(duration.as_micros()).unwrap();
-        self.clock.set(self.clock.get() + micros);
+        if !self.frozen_clock {
+            let micros = u64::try_from(duration.as_micros()).unwrap();
+            self.clock.set(self.clock.get() + micros);
+        }
     }
 
     fn cancelled(&self) -> bool {

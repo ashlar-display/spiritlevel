@@ -7,6 +7,7 @@
 //! it. A test drives the core through one double.
 
 mod bring_up;
+mod check;
 mod reconnect;
 mod tear_down;
 

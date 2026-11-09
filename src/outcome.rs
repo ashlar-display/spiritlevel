@@ -215,6 +215,25 @@ impl<S> ScramblingCheck<S> {
     };
 }
 
+impl<S: DdcError> ScramblingCheck<S> {
+    /// The same record with the first error's kind in place of the error, as an event
+    /// carries it.
+    #[must_use]
+    pub fn kinds(&self) -> ScramblingCheck<DdcErrorKind> {
+        ScramblingCheck {
+            result: self.result,
+            reads: self.reads,
+            failed_reads: self.failed_reads,
+            first_error: self.first_error.as_ref().map(|f| FailedRead {
+                error: f.error.kind(),
+                after: f.after,
+            }),
+            set_after: self.set_after,
+            read_cap_reached: self.read_cap_reached,
+        }
+    }
+}
+
 /// How the scrambling check ended.
 #[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

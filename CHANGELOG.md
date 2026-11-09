@@ -107,8 +107,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   link; a missed deadline is a warning on a scrambled link. A PHY failure, a non-transient
   SCDC error or a failed write under `Stop` ends it with `BringUpError`, after a tear-down
   unless `tear_down_on_error` is off (with the sink taken as gone after `Detached`). Its
-  events and `MAX_BRING_UP_EVENTS`. The scrambling check and cancellation follow; until then
-  the check is `NotApplicable`.
+  events and `MAX_BRING_UP_EVENTS`. Cancellation follows.
+- **The scrambling check in bring-up**: on a scrambled link, `Scrambling_Status` polled
+  every `check_interval` until the sink reports scrambling or `check_window` ends, timed
+  from the output start (from the scrambler coming on with `Running`). The result is in
+  `LinkUp::check`: `Set` with when, `NotSet`, or `Unreadable` when every read failed or one
+  failed with `Detached` or `Unsupported`; other failed reads are counted with the first
+  kept. A read count of `ceil(window / interval) + 1` ends the check on a clock that does
+  not advance, marked `read_cap_reached`. One `ScramblingChecked` event carries it.
+- **`BringUpConfig::validate`**: reports, in a `ConfigError`, a scrambling deadline shorter
+  than the ratio wait and a check interval longer than the check window. The procedures
+  still run with any values.
 
 ### Changed
 

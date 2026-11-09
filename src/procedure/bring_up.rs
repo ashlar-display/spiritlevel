@@ -21,6 +21,7 @@ use crate::outcome::{
 };
 use crate::params::TmdsLinkParams;
 
+use super::check::scrambling_check;
 use super::{TmdsIo, tear_down};
 
 /// A step that stopped the bring-up, and its error.
@@ -167,9 +168,10 @@ enum Failure<S, P> {
 }
 
 /// What the main path produced, for `LinkUp`.
-struct Up {
+struct Up<S> {
     sink_written_at: Option<Timestamp>,
     output_started_at: Timestamp,
+    check: ScramblingCheck<S>,
 }
 
 /// Records `kind` at the I/O's time.
@@ -304,7 +306,7 @@ async fn main_path<Io: TmdsIo, F: FnMut(TmdsEvent)>(
     config: &BringUpConfig,
     warnings: &mut Warnings<Io::ScdcError>,
     record: &mut F,
-) -> Result<Up, Failure<Io::ScdcError, Io::PhyError>> {
+) -> Result<Up<Io::ScdcError>, Failure<Io::ScdcError, Io::PhyError>> {
     let scrambled = link.scrambling();
     let running = config.output_during_sink_write == OutputDuringSinkWrite::Running;
 
@@ -328,9 +330,11 @@ async fn main_path<Io: TmdsIo, F: FnMut(TmdsEvent)>(
         wait_after(io, written_at, config.ratio_wait, record).await;
         let started = start(io, written_at, record).await?;
         deadline(io, written_at, started, scrambled, config, warnings, record);
+        let check = check_from(io, started, scrambled, config, record).await;
         return Ok(Up {
             sink_written_at: written_at,
             output_started_at: started,
+            check,
         });
     }
 
@@ -343,6 +347,7 @@ async fn main_path<Io: TmdsIo, F: FnMut(TmdsEvent)>(
         .await
         .map_err(|stop| Failure::Scdc(stop, OutputState::MayBeRunning))?;
     wait_after(io, written_at, config.ratio_wait, record).await;
+    let mut check = ScramblingCheck::NOT_APPLICABLE;
     if scrambled {
         set_scrambling(io, true, OutputState::MayBeRunning, record).await?;
         let scrambling_at = io.now();
@@ -355,10 +360,12 @@ async fn main_path<Io: TmdsIo, F: FnMut(TmdsEvent)>(
             warnings,
             record,
         );
+        check = check_from(io, scrambling_at, scrambled, config, record).await;
     }
     Ok(Up {
         sink_written_at: written_at,
         output_started_at: started,
+        check,
     })
 }
 
@@ -422,6 +429,22 @@ async fn start<Io: TmdsIo, F: FnMut(TmdsEvent)>(
     let after_write = written_at.map(|w| started.saturating_duration_since(w));
     emit(io, record, TmdsEventKind::OutputStarted { after_write });
     Ok(started)
+}
+
+/// The scrambling check from `from`, on a scrambled link; a plain link's check does not
+/// apply.
+async fn check_from<Io: TmdsIo, F: FnMut(TmdsEvent)>(
+    io: &mut Io,
+    from: Timestamp,
+    scrambled: bool,
+    config: &BringUpConfig,
+    record: &mut F,
+) -> ScramblingCheck<Io::ScdcError> {
+    if scrambled {
+        scrambling_check(io, from, config.check_window, config.check_interval, record).await
+    } else {
+        ScramblingCheck::NOT_APPLICABLE
+    }
 }
 
 /// A warning when scrambled output reached the sink later after its write than the
@@ -504,7 +527,7 @@ pub async fn bring_up<Io: TmdsIo, F: FnMut(TmdsEvent)>(
                 link: *link,
                 sink_written_at: up.sink_written_at,
                 output_started_at: up.output_started_at,
-                check: ScramblingCheck::NOT_APPLICABLE,
+                check: up.check,
                 warnings,
             }));
         }
@@ -889,6 +912,7 @@ mod tests {
     fn a_scrambled_link_comes_up_in_the_default_order() {
         let link = link(594_000, FRL_SINK);
         let mut io = TestIo::new();
+        io.scrambling_status = 0x01;
         let r = up(&mut io, &link, &BringUpConfig::DEFAULT);
         let ops = io.ops();
         assert_eq!(
@@ -907,12 +931,14 @@ mod tests {
             matches!(ops[7], Op::Delay(d) if d > Duration::ZERO && d <= Duration::from_millis(1))
         );
         assert_eq!(ops[8], Op::StartOutput);
-        assert_eq!(ops.len(), 9);
+        assert_eq!(ops[9], Op::ReadScramblingStatus);
+        assert_eq!(ops.len(), 10);
 
         let up = r.link_up().unwrap();
         assert_eq!(up.link, link);
         assert!(up.warnings.is_empty());
-        assert_eq!(up.check.result, CheckResult::NotApplicable);
+        assert_eq!(up.check.result, CheckResult::Set);
+        assert_eq!(up.check.reads, 1);
         let written = up.sink_written_at.unwrap();
         // The wait is measured from the write.
         assert!(
@@ -946,6 +972,25 @@ mod tests {
         assert_eq!(ops[6], Op::SetScrambling(true));
         assert!(r.has(TmdsEventKind::OutputStarted { after_write: None }));
         assert!(r.link_up().unwrap().warnings.is_empty());
+    }
+
+    #[test]
+    fn the_check_runs_from_the_scrambler_with_running_and_not_on_a_plain_link() {
+        let mut io = TestIo::new();
+        io.status_set_from_read = Some(3);
+        let config = MAIN_ONLY.with_output_during_sink_write(OutputDuringSinkWrite::Running);
+        let r = up(&mut io, &link(594_000, NO_FRL), &config);
+        let check = r.link_up().unwrap().check;
+        assert_eq!((check.result, check.reads), (CheckResult::Set, 3));
+        assert!(r.has(TmdsEventKind::ScramblingChecked { check }));
+
+        let mut io = TestIo::new();
+        let r = up(&mut io, &link(148_500, NO_FRL), &MAIN_ONLY);
+        assert_eq!(
+            r.link_up().unwrap().check.result,
+            CheckResult::NotApplicable
+        );
+        assert!(!io.ops().contains(&Op::ReadScramblingStatus));
     }
 
     #[test]
@@ -1007,6 +1052,7 @@ mod tests {
     #[test]
     fn no_delay_is_spent_once_the_wait_is_over() {
         let mut io = TestIo::new();
+        io.scrambling_status = 0x01;
         let r = up(
             &mut io,
             &link(594_000, NO_FRL),
@@ -1064,6 +1110,7 @@ mod tests {
         let mut io = TestIo::new();
         io.fail_scdc = Some(DdcErrorKind::Busy);
         io.scdc_failures = 1;
+        io.scrambling_status = 0x01;
         let r = up(&mut io, &link(594_000, NO_FRL), &MAIN_ONLY);
         assert_eq!(
             r.link_up().unwrap().warnings.iter().next(),
@@ -1073,7 +1120,11 @@ mod tests {
                 read_back: None
             })
         );
-        assert_eq!(io.ops().last(), Some(&Op::StartOutput));
+        // It carried on to the output and the check.
+        assert_eq!(
+            io.ops()[io.ops().len() - 2..],
+            [Op::StartOutput, Op::ReadScramblingStatus]
+        );
 
         // A plain link: the register read back after the failure.
         let mut io = TestIo::new();

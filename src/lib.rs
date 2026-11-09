@@ -36,7 +36,7 @@ mod types;
 struct ReadmeDoctests;
 
 pub use config::{
-    BringUpConfig, ClearFrl, OnTmdsConfigFailure, OutputDuringSinkWrite, ScramblerOff,
+    BringUpConfig, ClearFrl, ConfigError, OnTmdsConfigFailure, OutputDuringSinkWrite, ScramblerOff,
     SinkClearTiming, SinkPresence, SourceVersionWrite, TearDownConfig, TmdsConfigWrite,
 };
 pub use error::{ParamsError, UpdateError};
