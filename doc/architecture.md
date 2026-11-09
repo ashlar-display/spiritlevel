@@ -308,13 +308,16 @@ after 1 s and 5 s [1][7]; that is the caller's repeat, not this check.
   at most, stopping early would misreport a link that came up.
 - **Bounded by count as well as by time:** at most `ceil(window / interval) + 1` reads, so a
   clock that does not advance (a timer not started) ends the check instead of hanging the
-  bring-up; reaching the count is recorded (`read_cap_reached`). The window is checked with
-  the clock before each read, so slow failing reads overrun it by at most one read; the
+  bring-up; reaching the count is recorded (`read_cap_reached`). The count bounds reads, not
+  time: on such a clock the check takes as long as its reads take. No read starts after the
+  window: the check ends when another interval would reach the window's end, and again when
+  a delay ran past it; a slow read that started inside the window may end after it. The
   interval is spent by the `Delay`, not measured by the clock.
 - **At least one read**, whatever the window: a window of 0 reads once, and an interval of
   0 reads again at once. `BringUpConfig::validate()` reports the settings that defeat their
-  purpose: a deadline shorter than the wait (every bring-up would miss it) and an interval
-  longer than the window (one read); the procedures run with any values.
+  purpose: a deadline not longer than the wait (every bring-up would miss it), an interval
+  not shorter than the window (one read) and an interval of 0 (reads back to back); the
+  procedures run with any values.
 
 The check ends `Set` (with the time it took), `NotSet` (the window ended) or `Unreadable`
 (every read failed, or one failed with a non-transient error), with the number of reads and
@@ -598,7 +601,8 @@ pub struct BringUpConfig {
     pub tear_down: TearDownConfig,                     // used after an error or a cancel
 }
 impl BringUpConfig {
-    /// A deadline shorter than the wait, or an interval longer than the window.
+    /// A deadline not longer than the wait, an interval not shorter than the window, or an
+    /// interval of 0.
     pub const fn validate(&self) -> Result<(), ConfigError>;
 }
 
@@ -621,7 +625,11 @@ pub enum SinkPresence { Present, Gone }
 
 /// Every problem `validate` found; `Display` and `core::error::Error`.
 #[non_exhaustive]
-pub struct ConfigError { pub deadline_shorter_than_wait: bool, pub interval_longer_than_window: bool }
+pub struct ConfigError {
+    pub deadline_always_missed: bool,
+    pub check_reads_once: bool,
+    pub check_interval_zero: bool,
+}
 ```
 
 All are `Copy`, every setter is a `const fn`, so firmware fixes its settings at compile time.

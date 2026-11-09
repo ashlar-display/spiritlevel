@@ -13,7 +13,10 @@ use super::TmdsIo;
 
 /// The most reads one check makes: `ceil(window / interval) + 1`, so a clock that does not
 /// advance ends the check instead of hanging it. With an interval of 0 (back-to-back reads),
-/// one read per microsecond of the window.
+/// one read per microsecond of the window. It bounds the number of reads, not the time: on
+/// a clock that does not advance, the check takes as long as that many reads take, which
+/// with a tiny interval is long ([`BringUpConfig::validate`](crate::BringUpConfig::validate)
+/// reports an interval of 0).
 fn read_cap(window: Duration, interval: Duration) -> u32 {
     let per = if interval.is_zero() {
         Duration::from_micros(1)
@@ -25,8 +28,10 @@ fn read_cap(window: Duration, interval: Duration) -> u32 {
 }
 
 /// Polls `Scrambling_Status` from `from` until the sink reports scrambling, the window ends
-/// or the read count is reached. At least one read; the window is checked with the clock
-/// before each later read, so a slow failing read overruns it by at most one read. A failed
+/// or the read count is reached. At least one read; no later read starts after the window:
+/// the check ends when another interval would reach the window's end, and again if the
+/// delay itself ran past it. A slow read that starts inside the window may still end after
+/// it. A failed
 /// read does not end the check unless its error is not transient (`Detached`,
 /// `Unsupported`). The cancel flag is read before every read; once set, the check ends
 /// [`CheckResult::Cancelled`]. Records one event, at its end.
@@ -49,7 +54,8 @@ pub(crate) async fn scrambling_check<Io: TmdsIo, F: FnMut(TmdsEvent)>(
     loop {
         if check.reads > 0 {
             // The window first: the read count marks a clock that did not advance.
-            if io.now().saturating_duration_since(from) >= window {
+            let elapsed = io.now().saturating_duration_since(from);
+            if elapsed.saturating_add(interval) >= window {
                 break;
             }
             if check.reads >= cap {
@@ -57,6 +63,10 @@ pub(crate) async fn scrambling_check<Io: TmdsIo, F: FnMut(TmdsEvent)>(
                 break;
             }
             io.delay(interval).await;
+            // A delay is "at least" its duration: one that ran late ends the check too.
+            if io.now().saturating_duration_since(from) >= window {
+                break;
+            }
         }
         if io.cancelled() {
             check.result = CheckResult::Cancelled;
@@ -100,7 +110,7 @@ pub(crate) async fn scrambling_check<Io: TmdsIo, F: FnMut(TmdsEvent)>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::procedure::test_io::{TestIo, block_on};
+    use crate::procedure::test_io::{Op, TestIo, block_on};
 
     const WINDOW: Duration = Duration::from_millis(200);
     const INTERVAL: Duration = Duration::from_millis(1);
@@ -202,6 +212,68 @@ mod tests {
         let (check, _) = run(&mut io);
         assert_eq!(check.result, CheckResult::Cancelled);
         assert_eq!((check.reads, check.failed_reads), (3, 3));
+    }
+
+    #[test]
+    fn no_read_starts_after_the_window() {
+        let window = Duration::from_millis(10);
+        let interval = Duration::from_millis(3);
+        let mut io = TestIo::new();
+        let from = io.now();
+        let check = block_on(scrambling_check(
+            &mut io,
+            from,
+            window,
+            interval,
+            &mut |_| {},
+        ));
+        // Reads at 0, 3, 6 and 9 ms; another interval would reach 12 ms.
+        assert_eq!((check.result, check.reads), (CheckResult::NotSet, 4));
+        assert!(io.now().saturating_duration_since(from) < Duration::from_millis(11));
+
+        // A sink that would report at the fifth read is not seen.
+        let mut io = TestIo::new();
+        io.status_set_from_read = Some(5);
+        let from = io.now();
+        let check = block_on(scrambling_check(
+            &mut io,
+            from,
+            window,
+            interval,
+            &mut |_| {},
+        ));
+        assert_eq!(check.result, CheckResult::NotSet);
+
+        // An interval as long as the window, or longer, reads once.
+        for interval in [window, window * 2] {
+            let mut io = TestIo::new();
+            let from = io.now();
+            let check = block_on(scrambling_check(
+                &mut io,
+                from,
+                window,
+                interval,
+                &mut |_| {},
+            ));
+            assert_eq!(check.reads, 1);
+            assert!(!io.ops().iter().any(|op| matches!(op, Op::Delay(_))));
+        }
+    }
+
+    #[test]
+    fn a_delay_that_runs_late_ends_the_check() {
+        let mut io = TestIo::new();
+        io.delay_extra = Duration::from_millis(5);
+        let from = io.now();
+        let check = block_on(scrambling_check(
+            &mut io,
+            from,
+            Duration::from_millis(10),
+            Duration::from_millis(3),
+            &mut |_| {},
+        ));
+        // 0 ms, then 8 ms (3 + 5); the next delay ends at 16 ms, past the window.
+        assert_eq!(check.reads, 2);
     }
 
     #[test]

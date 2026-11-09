@@ -75,6 +75,8 @@ pub struct TestIo {
     status_reads: u32,
     /// The clock does not advance: neither on a read nor on a delay.
     pub frozen_clock: bool,
+    /// Every delay takes this much longer than asked, as a late timer would.
+    pub delay_extra: Duration,
 }
 
 impl TestIo {
@@ -101,6 +103,7 @@ impl TestIo {
             status_set_from_read: None,
             status_reads: 0,
             frozen_clock: false,
+            delay_extra: Duration::ZERO,
         }
     }
 
@@ -223,7 +226,7 @@ impl TmdsIo for TestIo {
     async fn delay(&mut self, duration: Duration) {
         self.push(Op::Delay(duration));
         if !self.frozen_clock {
-            let micros = u64::try_from(duration.as_micros()).unwrap();
+            let micros = u64::try_from((duration + self.delay_extra).as_micros()).unwrap();
             self.clock.set(self.clock.get() + micros);
         }
     }

@@ -146,9 +146,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   tear-down. The cancel flag is read by the check alone, so a cancel leaves the link
   running with the check `Cancelled`. Its events (`QuickRestoreStarted`,
   `QuickRestoreEnded`) and `MAX_QUICK_RESTORE_EVENTS`.
-- **`BringUpConfig::validate`**: reports, in a `ConfigError`, a scrambling deadline shorter
-  than the ratio wait and a check interval longer than the check window. The procedures
-  still run with any values.
+- **`BringUpConfig::validate`**: reports, in a `ConfigError`, a scrambling deadline not
+  longer than the ratio wait (every bring-up would miss it), a check interval not shorter
+  than the check window (the check reads once) and a check interval of 0 (back-to-back
+  reads). The procedures still run with any values.
 
 ### Changed
 

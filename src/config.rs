@@ -65,17 +65,18 @@ impl BringUpConfig {
     ///
     /// # Errors
     ///
-    /// [`ConfigError`] with every problem found: a scrambling deadline shorter than the ratio
-    /// wait, which counts towards it, so every bring-up warns; a check interval longer than
-    /// the check window, so the check reads once.
+    /// [`ConfigError`] with every problem found: a scrambling deadline not longer than the
+    /// ratio wait, which counts towards it, so every bring-up misses it; a check interval
+    /// not shorter than the check window, so the check reads once; a check interval of 0,
+    /// so the check reads back to back, as fast as the bus answers.
     pub const fn validate(&self) -> Result<(), ConfigError> {
         let error = ConfigError {
-            deadline_shorter_than_wait: self.scrambling_deadline.as_nanos()
-                < self.ratio_wait.as_nanos(),
-            interval_longer_than_window: self.check_interval.as_nanos()
-                > self.check_window.as_nanos(),
+            deadline_always_missed: self.scrambling_deadline.as_nanos()
+                <= self.ratio_wait.as_nanos(),
+            check_reads_once: self.check_interval.as_nanos() >= self.check_window.as_nanos(),
+            check_interval_zero: self.check_interval.is_zero(),
         };
-        if error.deadline_shorter_than_wait || error.interval_longer_than_window {
+        if error.deadline_always_missed || error.check_reads_once || error.check_interval_zero {
             Err(error)
         } else {
             Ok(())
@@ -176,27 +177,43 @@ impl Default for BringUpConfig {
 #[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ConfigError {
-    /// The scrambling deadline is shorter than the ratio wait, which counts towards it: every
-    /// bring-up would miss it.
-    pub deadline_shorter_than_wait: bool,
-    /// The check interval is longer than the check window: the check would read once.
-    pub interval_longer_than_window: bool,
+    /// The scrambling deadline is not longer than the ratio wait, which counts towards it:
+    /// every bring-up would miss it.
+    pub deadline_always_missed: bool,
+    /// The check interval is not shorter than the check window: the check would read once.
+    pub check_reads_once: bool,
+    /// The check interval is 0: the check would read back to back, as fast as the bus
+    /// answers, for the whole window.
+    pub check_interval_zero: bool,
 }
 
 impl fmt::Display for ConfigError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match (
-            self.deadline_shorter_than_wait,
-            self.interval_longer_than_window,
-        ) {
-            (true, true) => f.write_str(
-                "the scrambling deadline is shorter than the ratio wait, and the check \
-                 interval is longer than the check window",
+        let problems = [
+            (
+                self.deadline_always_missed,
+                "the scrambling deadline is not longer than the ratio wait",
             ),
-            (true, false) => f.write_str("the scrambling deadline is shorter than the ratio wait"),
-            (false, true) => f.write_str("the check interval is longer than the check window"),
-            (false, false) => f.write_str("the bring-up settings are inconsistent"),
+            (
+                self.check_reads_once,
+                "the check interval is not shorter than the check window",
+            ),
+            (self.check_interval_zero, "the check interval is 0"),
+        ];
+        let mut first = true;
+        for (found, text) in problems {
+            if found {
+                if !first {
+                    f.write_str("; ")?;
+                }
+                f.write_str(text)?;
+                first = false;
+            }
         }
+        if first {
+            f.write_str("the bring-up settings are inconsistent")?;
+        }
+        Ok(())
     }
 }
 
@@ -466,39 +483,61 @@ mod tests {
     #[test]
     fn validate_reports_every_problem() {
         const { assert!(BringUpConfig::DEFAULT.validate().is_ok()) };
+        let none = ConfigError {
+            deadline_always_missed: false,
+            check_reads_once: false,
+            check_interval_zero: false,
+        };
+        // The boundaries: equal is already a problem.
+        let wait = Duration::from_millis(50);
         let late = BringUpConfig::DEFAULT
-            .with_ratio_wait(Duration::from_millis(100))
-            .with_scrambling_deadline(Duration::from_millis(50));
+            .with_ratio_wait(wait)
+            .with_scrambling_deadline(wait);
         assert_eq!(
             late.validate(),
             Err(ConfigError {
-                deadline_shorter_than_wait: true,
-                interval_longer_than_window: false,
+                deadline_always_missed: true,
+                ..none
             })
         );
-        let both = late.with_check_interval(Duration::from_millis(300));
-        let error = both.validate().unwrap_err();
-        assert!(error.deadline_shorter_than_wait && error.interval_longer_than_window);
+        assert!(
+            late.with_scrambling_deadline(wait + Duration::from_nanos(1))
+                .validate()
+                .is_ok()
+        );
+        let once = BringUpConfig::DEFAULT.with_check_interval(BringUpConfig::DEFAULT.check_window);
+        assert_eq!(
+            once.validate(),
+            Err(ConfigError {
+                check_reads_once: true,
+                ..none
+            })
+        );
+        let zero = BringUpConfig::DEFAULT.with_check_interval(Duration::ZERO);
+        assert_eq!(
+            zero.validate(),
+            Err(ConfigError {
+                check_interval_zero: true,
+                ..none
+            })
+        );
 
         extern crate std;
         use std::string::ToString;
         assert_eq!(
             late.validate().unwrap_err().to_string(),
-            "the scrambling deadline is shorter than the ratio wait"
+            "the scrambling deadline is not longer than the ratio wait"
         );
+        let all = late
+            .with_check_window(Duration::ZERO)
+            .with_check_interval(Duration::ZERO)
+            .validate()
+            .unwrap_err();
         assert_eq!(
-            BringUpConfig::DEFAULT
-                .with_check_interval(Duration::from_secs(1))
-                .validate()
-                .unwrap_err()
-                .to_string(),
-            "the check interval is longer than the check window"
+            all.to_string(),
+            "the scrambling deadline is not longer than the ratio wait; the check interval \
+             is not shorter than the check window; the check interval is 0"
         );
-        assert!(error.to_string().contains(", and the check"));
-        let none = ConfigError {
-            deadline_shorter_than_wait: false,
-            interval_longer_than_window: false,
-        };
         assert_eq!(none.to_string(), "the bring-up settings are inconsistent");
     }
 
