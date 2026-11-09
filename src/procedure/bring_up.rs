@@ -1239,14 +1239,37 @@ mod tests {
     }
 
     #[test]
-    fn no_delay_is_spent_once_the_wait_is_over() {
+    fn the_wait_runs_from_the_write_and_counts_what_came_after_it() {
+        // The PHY's two calls after the write cost 300 µs each: of the 1 ms wait, a little
+        // under 400 µs is left to spend.
         let mut io = TestIo::new();
         io.scrambling_status = 0x01;
-        let r = up(
-            &mut io,
-            &link(594_000, NO_FRL),
-            &MAIN_ONLY.with_ratio_wait(Duration::ZERO),
+        io.op_micros = 300;
+        let r = up(&mut io, &link(594_000, NO_FRL), &MAIN_ONLY);
+        let delays: [Duration; 1] = {
+            let mut found = [Duration::ZERO; 1];
+            let mut n = 0;
+            for op in io.ops() {
+                if let Op::Delay(d) = op {
+                    found[n] = *d;
+                    n += 1;
+                }
+            }
+            assert_eq!(n, 1);
+            found
+        };
+        let left = delays[0];
+        assert!(
+            left > Duration::from_micros(390) && left < Duration::from_micros(400),
+            "{left:?}"
         );
+        assert!(r.has(TmdsEventKind::WaitSpent { duration: left }));
+
+        // Calls that alone take longer than the wait leave nothing to spend.
+        let mut io = TestIo::new();
+        io.scrambling_status = 0x01;
+        io.op_micros = 600;
+        let r = up(&mut io, &link(594_000, NO_FRL), &MAIN_ONLY);
         assert!(!io.ops().iter().any(|op| matches!(op, Op::Delay(_))));
         assert!(r.has(TmdsEventKind::WaitSpent {
             duration: Duration::ZERO
