@@ -51,7 +51,10 @@ pub use event::{
     MAX_RECONNECT_CHECK_EVENTS, MAX_TEAR_DOWN_EVENTS, SinkClearSkip, SourceVersionSkip,
     TmdsConfigSkip, TmdsEvent, TmdsEventKind, TmdsStep,
 };
-pub use link::{Cancel, NoCancel, TmdsLink};
+/// The cancel flag, re-exported from hdmi-hal, so one flag stops TMDS bring-up and FRL
+/// training alike. Implemented for `AtomicBool` and any reference to a flag.
+pub use hdmi_hal::cancel::{Cancel, NoCancel};
+pub use link::TmdsLink;
 pub use outcome::{
     BringUpError, BringUpOutcome, BringUpWarning, CheckResult, Cleanup, FailedRead, LinkUp,
     OutputState, ReconnectCheck, RestoreError, Restored, ScramblingCheck, SinkClear, TearDownError,

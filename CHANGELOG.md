@@ -57,8 +57,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     1/40 link the sink then switches its clock ratio with TMDS running, as Xilinx and Amlogic
     do), the source's scrambler set again to the link's, and the scrambling check on a
     scrambled link. `Restored` and `RestoreError` (`Scdc` or `Phy`, with no tear-down).
-- **Cancellation** through `Cancel`, implemented for `&AtomicBool`, with `NoCancel` the
-  default (`TmdsLink::with_cancel`). Bring-up reads the flag at entry, before each SCDC step,
+- **Cancellation** through hdmi-hal's `Cancel`, re-exported, implemented for `AtomicBool`
+  and any reference to a flag, with `NoCancel` the default (`TmdsLink::with_cancel`). Bring-up reads the flag at entry, before each SCDC step,
   before each slice of the ratio wait (slices of at most `check_interval`) and before each
   read of the check, and ends `BringUpOutcome::Cancelled` with where it was seen
   (`CancelPoint`): at entry before any I/O, otherwise after a tear-down. Tear-down and the

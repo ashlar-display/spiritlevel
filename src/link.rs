@@ -3,10 +3,10 @@
 
 use core::future::Future;
 use core::pin::pin;
-use core::sync::atomic::{AtomicBool, Ordering};
 use core::task::{Context, Poll, Waker};
 use core::time::Duration;
 
+use hdmi_hal::cancel::{Cancel, NoCancel};
 use hdmi_hal::phy::{TmdsPhy, TmdsPhyConfig, TmdsVideo};
 use hdmi_hal::time::{Clock, Delay, Timestamp};
 
@@ -20,31 +20,6 @@ use crate::params::TmdsLinkParams;
 use crate::procedure::{self, TmdsIo};
 use crate::scdc::TmdsScdc;
 use crate::types::{ScramblingStatus, SinkTmdsConfig, SinkTmdsFacts, TmdsConfigReading};
-
-/// A flag the caller sets to stop a procedure: read before each step, wait and poll.
-///
-/// The procedures never clear it: the caller resets it before its next call.
-pub trait Cancel {
-    /// Whether the caller has asked the procedure to stop.
-    fn is_cancelled(&self) -> bool;
-}
-
-/// Never cancels: the default.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
-pub struct NoCancel;
-
-impl Cancel for NoCancel {
-    fn is_cancelled(&self) -> bool {
-        false
-    }
-}
-
-/// A flag another task or an interrupt handler sets.
-impl Cancel for &AtomicBool {
-    fn is_cancelled(&self) -> bool {
-        self.load(Ordering::Relaxed)
-    }
-}
 
 /// What a tear-down returns, over the parts' error types.
 type TearDownResult<S, P> = Result<
@@ -358,6 +333,8 @@ mod tests {
 
     use hdmi_hal::ddc::DdcErrorKind;
     use hdmi_hal::phy::TmdsPhyCapabilities;
+
+    use core::sync::atomic::{AtomicBool, Ordering};
 
     use super::*;
     use crate::outcome::SinkClear;

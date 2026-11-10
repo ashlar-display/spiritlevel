@@ -87,8 +87,8 @@ culvert = { default-features = false, optional = true }
 Dependencies point only down the stack: nothing below `spiritlevel` depends on it.
 
 - **hdmi-hal** (always): the TMDS PHY trait (`TmdsPhy`, with its capabilities report and
-  `TmdsClockRatio`, which `spiritlevel` re-exports as `ClockRatio`), and the clock and delay
-  traits. It is a public dependency. hdmi-hal itself depends on display-types, so
+  `TmdsClockRatio`, which `spiritlevel` re-exports as `ClockRatio`), the clock and delay
+  traits, and the cancel flag (`Cancel`, re-exported). It is a public dependency. hdmi-hal itself depends on display-types, so
   display-types is always in the graph.
 - **`display-types`** (default): `From<&HdmiForumSinkCap>` and
   `From<Option<&HdmiForumSinkCap>>` for `SinkTmdsFacts`. Without it the caller states the
@@ -360,7 +360,8 @@ caller that only looks at the warnings still sees it.
 
 ### Cancellation
 
-A caller stops a running procedure through its `Cancel` flag (`&AtomicBool` implements it),
+A caller stops a running procedure through its `Cancel` flag (hdmi-hal's, re-exported;
+`AtomicBool` and any reference to a flag implement it),
 never by dropping the future: a dropped call leaves the PHY and the sink in an unknown state.
 Bring-up reads the flag at entry, before each SCDC step, before each slice of the ratio wait
 and before each read of the check, so a cancel is seen within one `check_interval` whatever
@@ -888,7 +889,7 @@ impl<S: TmdsScdc, P: TmdsPhy, K: Clock, D: Delay, X: Cancel> TmdsLink<S, P, K, D
     // scdc, scdc_mut, phy, phy_mut, clock: the parts between procedures
 }
 
-pub trait Cancel { fn is_cancelled(&self) -> bool; }   // for &AtomicBool and NoCancel
+pub use hdmi_hal::cancel::{Cancel, NoCancel};   // for AtomicBool, &T and NoCancel
 ```
 
 - **`TmdsIo` flattens the I/O** into one trait, so the core sees one bound and a test drives
@@ -898,7 +899,8 @@ pub trait Cancel { fn is_cancelled(&self) -> bool; }   // for &AtomicBool and No
   futures.
 - **`Cancel` is a trait,** not a bare `&AtomicBool`, so the driver needs no lifetime unless
   it is given a flag, and a platform with its own primitive implements one method.
-  `NoCancel`, the default, never cancels.
+  `NoCancel`, the default, never cancels. It is hdmi-hal's, so one flag type serves every
+  procedure in the stack, FRL training included.
 - **One value can be both clock and delay:** implement `Clock` and `Delay` for a reference
   to it (`&Time`, keeping the time in a `Cell`) and pass the reference twice.
 
