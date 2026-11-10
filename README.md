@@ -84,12 +84,11 @@ Then bring the link up over the parts: the sink's SCDC (`TmdsScdc`, implemented 
 culvert's client by the `culvert` feature), a `TmdsPhy`, a `Clock` and a `Delay`:
 
 ```rust
-use hdmi_hal::phy::{TmdsPhy, TmdsVideo};
-use hdmi_hal::time::{Clock, Delay};
-use hdmi_hal::{ColorBitDepth, ColorFormat};
+// spiritlevel re-exports the hdmi-hal types its API uses, so it is the only dependency.
 use spiritlevel::{
-    BringUpConfig, BringUpOutcome, CheckResult, SinkPresence, SinkTmdsFacts,
-    SourceTmdsFacts, TearDownConfig, TmdsLink, TmdsLinkParams, TmdsPolicy, TmdsScdc,
+    BringUpConfig, BringUpOutcome, CheckResult, Clock, ColorBitDepth, ColorFormat, Delay,
+    SinkPresence, SinkTmdsFacts, SourceTmdsFacts, TearDownConfig, TmdsLink, TmdsLinkParams,
+    TmdsPhy, TmdsPolicy, TmdsScdc, TmdsVideo,
 };
 
 /// Brings up 4K60 RGB over TMDS, then stops it again.

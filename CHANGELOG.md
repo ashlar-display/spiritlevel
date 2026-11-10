@@ -122,6 +122,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     `sink_config()` is `None` exactly when no write is due.
   - `TmdsLinkParams::sink()`, the sink facts a link was chosen from, and `fits`, whether
     choosing again for other sink facts gives the same ratio, scrambling and `TMDS_Config`.
+- **Re-exports of the types the API uses**, so `spiritlevel` is a caller's or an
+  implementation's only dependency and names the same versions: from hdmi-hal `TmdsPhy`,
+  `TmdsPhyCapabilities`, `TmdsPhyConfig`, `TmdsVideo`, `ColorBitDepth`, `ColorFormat`,
+  `Clock`, `Delay`, `Timestamp`, `DdcError`, `DdcErrorKind`, `NoAcknowledgeSource`,
+  `Cancel` and `NoCancel`; with `display-types`, `HdmiForumSinkCap`; with `culvert`,
+  culvert's `Scdc`, `ScdcError`, `ProtocolError` and `ScdcTransport`.
 
 ### Changed
 

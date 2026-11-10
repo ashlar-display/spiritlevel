@@ -69,3 +69,21 @@ pub use types::{
     ClockRatio, ScramblingStatus, ScramblingThreshold, SinkTmdsConfig, SinkTmdsFacts,
     SourceTmdsFacts, TmdsConfigGate, TmdsConfigReading, TmdsPolicy,
 };
+
+/// The hdmi-hal types the procedures' signatures use, re-exported so that callers and
+/// implementations name the same versions `spiritlevel` does without depending on hdmi-hal
+/// themselves: the PHY trait and its configuration, the clock, delay and timestamp, the
+/// SCDC error classification, and the colour depth and format a `TmdsVideo` carries.
+pub use hdmi_hal::ddc::{DdcError, DdcErrorKind, NoAcknowledgeSource};
+pub use hdmi_hal::phy::{TmdsPhy, TmdsPhyCapabilities, TmdsPhyConfig, TmdsVideo};
+pub use hdmi_hal::time::{Clock, Delay, Timestamp};
+pub use hdmi_hal::{ColorBitDepth, ColorFormat};
+
+/// The sink capabilities the sink facts convert from, re-exported from display-types.
+#[cfg(feature = "display-types")]
+pub use display_types::cea861::HdmiForumSinkCap;
+
+/// culvert's client, its errors and the transport it runs over, re-exported for the
+/// adapter's users.
+#[cfg(feature = "culvert")]
+pub use ::culvert::{ProtocolError, Scdc, ScdcError, ScdcTransport};

@@ -88,7 +88,10 @@ Dependencies point only down the stack: nothing below `spiritlevel` depends on i
 
 - **hdmi-hal** (always): the TMDS PHY trait (`TmdsPhy`, with its capabilities report and
   `TmdsClockRatio`, which `spiritlevel` re-exports as `ClockRatio`), the clock and delay
-  traits, and the cancel flag (`Cancel`, re-exported). It is a public dependency. hdmi-hal itself depends on display-types, so
+  traits, and the cancel flag. It is a public dependency, and `spiritlevel` re-exports the
+  types its API uses (the PHY and time traits, `TmdsVideo` and its colour types, the DDC
+  error classification, `Cancel`), so a caller or an implementation needs no other
+  dependency and names the same versions; with `culvert`, culvert's client and errors too. hdmi-hal itself depends on display-types, so
   display-types is always in the graph.
 - **`display-types`** (default): `From<&HdmiForumSinkCap>` and
   `From<Option<&HdmiForumSinkCap>>` for `SinkTmdsFacts`. Without it the caller states the
