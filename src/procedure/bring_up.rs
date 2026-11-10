@@ -598,6 +598,10 @@ fn deadline<Io: TmdsIo, F: FnMut(TmdsEvent)>(
 ///
 /// # Errors
 ///
+/// [`BringUpError::VideoMismatch`], before any I/O, when `video`'s TMDS character rate
+/// ([`TmdsVideo::character_rate_khz`]) is not `link`'s: the caller chooses the link for the
+/// rate the video gives.
+///
 /// [`BringUpError`] when a PHY call failed, or the sink's `TMDS_Config` write failed with a
 /// non-transient error (`Detached`, `Unsupported`) or under `OnTmdsConfigFailure::Stop`. A
 /// failure before both paths, or of a plain link's read-back, is a warning.
@@ -620,6 +624,24 @@ pub async fn bring_up<Io: TmdsIo, F: FnMut(TmdsEvent)>(
             config: *config,
         },
     );
+    // The PHY takes the rate and the video together: they must agree, or it would run at one
+    // rate while the sink was set up for the other.
+    let video_rate_khz = video.character_rate_khz();
+    if video_rate_khz != Some(link.rate_khz()) {
+        let link_rate_khz = link.rate_khz();
+        emit(
+            io,
+            record,
+            TmdsEventKind::VideoMismatch {
+                link_rate_khz,
+                video_rate_khz,
+            },
+        );
+        return Err(BringUpError::VideoMismatch {
+            link_rate_khz,
+            video_rate_khz,
+        });
+    }
     let mut warnings = Warnings::new();
     if io.cancelled() {
         let at = CancelPoint::Entry;
@@ -714,10 +736,8 @@ pub async fn bring_up<Io: TmdsIo, F: FnMut(TmdsEvent)>(
 
     if config.tear_down_on_error {
         let torn = tear_down(io, link, &config.tear_down, presence, record).await;
-        match &mut error {
-            BringUpError::Scdc { cleanup, .. } | BringUpError::Phy { cleanup, .. } => {
-                *cleanup = Cleanup::TornDown(torn);
-            }
+        if let BringUpError::Scdc { cleanup, .. } | BringUpError::Phy { cleanup, .. } = &mut error {
+            *cleanup = Cleanup::TornDown(torn);
         }
     }
     emit(
@@ -1038,11 +1058,14 @@ mod tests {
     use crate::{CheckResult, ClockRatio, MAX_BRING_UP_EVENTS};
     use hdmi_hal::phy::TmdsVideo;
 
-    const VIDEO: TmdsVideo = TmdsVideo::new(
-        594_000,
-        hdmi_hal::ColorBitDepth::Depth8,
-        hdmi_hal::ColorFormat::Rgb444,
-    );
+    /// 8 bpc RGB at the link's rate: the video the link was chosen for.
+    fn video(link: &TmdsLinkParams) -> TmdsVideo {
+        TmdsVideo::new(
+            link.rate_khz(),
+            hdmi_hal::ColorBitDepth::Depth8,
+            hdmi_hal::ColorFormat::Rgb444,
+        )
+    }
 
     /// No FRL clear and no `Source_Version`: only the main path's SCDC calls.
     const MAIN_ONLY: BringUpConfig = BringUpConfig::DEFAULT
@@ -1073,7 +1096,7 @@ mod tests {
     fn up(io: &mut TestIo, link: &TmdsLinkParams, config: &BringUpConfig) -> Up {
         let mut events = [None; 32];
         let mut count = 0;
-        let result = block_on(bring_up(io, link, VIDEO, config, &mut |e| {
+        let result = block_on(bring_up(io, link, video(link), config, &mut |e| {
             events[count] = Some(e.kind);
             count += 1;
         }));
@@ -1089,8 +1112,71 @@ mod tests {
         Op::Configure(TmdsPhyConfig::new(
             link.rate_khz(),
             link.clock_ratio(),
-            VIDEO,
+            video(link),
         ))
+    }
+
+    #[test]
+    fn a_video_that_does_not_give_the_links_rate_is_refused_before_any_io() {
+        let link = link(594_000, NO_FRL);
+        let run = |video: TmdsVideo| {
+            let mut io = TestIo::new();
+            let mut events = [None; 4];
+            let mut count = 0;
+            let result = block_on(bring_up(&mut io, &link, video, &MAIN_ONLY, &mut |e| {
+                events[count] = Some(e.kind);
+                count += 1;
+            }));
+            assert!(io.ops().is_empty());
+            (result, events, count)
+        };
+        // 1080p for a 4K link.
+        let (result, events, count) = run(TmdsVideo::new(
+            148_500,
+            hdmi_hal::ColorBitDepth::Depth8,
+            hdmi_hal::ColorFormat::Rgb444,
+        ));
+        assert!(matches!(
+            result,
+            Err(BringUpError::VideoMismatch {
+                link_rate_khz: 594_000,
+                video_rate_khz: Some(148_500),
+            })
+        ));
+        assert_eq!(count, 2);
+        assert_eq!(
+            events[1],
+            Some(TmdsEventKind::VideoMismatch {
+                link_rate_khz: 594_000,
+                video_rate_khz: Some(148_500)
+            })
+        );
+        // The same 4K at 10 bits is 742.5 MHz, not this link's rate either.
+        let (result, ..) = run(TmdsVideo::new(
+            594_000,
+            hdmi_hal::ColorBitDepth::Depth10,
+            hdmi_hal::ColorFormat::Rgb444,
+        ));
+        assert!(matches!(
+            result,
+            Err(BringUpError::VideoMismatch {
+                video_rate_khz: Some(742_500),
+                ..
+            })
+        ));
+        // A depth TMDS does not carry has no rate.
+        let (result, ..) = run(TmdsVideo::new(
+            594_000,
+            hdmi_hal::ColorBitDepth::Depth6,
+            hdmi_hal::ColorFormat::Rgb444,
+        ));
+        assert!(matches!(
+            result,
+            Err(BringUpError::VideoMismatch {
+                video_rate_khz: None,
+                ..
+            })
+        ));
     }
 
     #[test]

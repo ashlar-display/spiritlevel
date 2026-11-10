@@ -28,8 +28,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     each a warning when it fails, whatever the error's kind; then the output stopped, the
     sink's `TMDS_Config` written (read-modify-write or whole byte; skipped where no write is
     due, with `TmdsConfigSkip`), the PHY configured with its scrambler, the ratio wait spent
-    from the write, and the output started. With `OutputDuringSinkWrite::Running`,
-    unscrambled output runs through the write and the scrambler comes on after the wait. A
+    from the write, and the output started; a video whose TMDS character rate is not the
+    link's is refused first, before any I/O (`BringUpError::VideoMismatch`). With
+    `OutputDuringSinkWrite::Running`, unscrambled output runs through the write and the
+    scrambler comes on after the wait. A
     failed `TMDS_Config` write carries on as a warning under `CarryOn`, with the register
     read back on a plain link; a missed deadline is a warning. A PHY failure, a
     non-transient error of the `TMDS_Config` write or a failed write under `Stop` ends it

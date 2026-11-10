@@ -239,8 +239,11 @@ request the SCDC implementation cannot do (`Unsupported`) does not block the lin
 ### Bring-up
 
 `bring_up(link, video, config)` brings up the link `choose` decided, carrying `video` (the
-TMDS character rate's colour depth and format, which the PHY needs). The steps for a
-scrambled link above 340 Mcsc, with `BringUpConfig::DEFAULT`:
+pixel clock, colour depth and format, which the PHY needs). The PHY takes the rate and the
+video together, so they must agree: a link whose rate is not the one the video gives
+(`TmdsVideo::character_rate_khz`, hdmi-hal's) is refused before any I/O, with
+`BringUpError::VideoMismatch`. A caller gets the rate for `choose` from the video. The steps
+for a scrambled link above 340 Mcsc, with `BringUpConfig::DEFAULT`:
 
 1. **Output off.** TMDS output is stopped before anything is written, and stays stopped
    until step 5. i915, amdgpu, the dw-hdmi family, MediaTek v2, Xilinx and Amlogic write the
@@ -352,7 +355,8 @@ caller that only looks at the warnings still sees it.
 - **`BringUpError`** when a step failed in a way that stops the bring-up: a PHY call (output
   off, configure, scrambler, output on), or the sink's `TMDS_Config` write with a
   non-transient error or under `Stop`. It names the step, the error, whether the output may be
-  running, and the warnings gathered.
+  running, and the warnings gathered. Or, before any I/O, `VideoMismatch`: the video does
+  not give the link's rate.
 - **After an error, a tear-down**, with the caller's `TearDownConfig`, and its result in the
   error (`Cleanup`); with the sink taken to be gone after `Detached`. `tear_down_on_error:
   false` leaves both ends as the error left them, for a tool that wants to read the state.
@@ -699,6 +703,7 @@ pub struct Warnings<S> { /* private */ }
 pub enum BringUpError<S, P> {
     Scdc { step: TmdsStep, error: S, output: OutputState, cleanup: Cleanup<S, P>, warnings: Warnings<S> },
     Phy { step: TmdsStep, error: P, output: OutputState, cleanup: Cleanup<S, P>, warnings: Warnings<S> },
+    VideoMismatch { link_rate_khz: u32, video_rate_khz: Option<u32> },   // before any I/O
 }
 
 #[non_exhaustive]

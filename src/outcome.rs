@@ -175,6 +175,17 @@ pub enum BringUpError<S, P> {
         /// The warnings gathered before it.
         warnings: Warnings<S>,
     },
+    /// The video's TMDS character rate (`TmdsVideo::character_rate_khz`) is not the rate the
+    /// link was chosen for, so the PHY would be configured for one and the sink for the
+    /// other. Refused before any I/O; nothing to clean up.
+    #[non_exhaustive]
+    VideoMismatch {
+        /// The rate the link was chosen for.
+        link_rate_khz: u32,
+        /// The video's rate; `None` for a video TMDS cannot carry (a depth or format it has
+        /// no rate for).
+        video_rate_khz: Option<u32>,
+    },
 }
 
 /// What happened after a bring-up's error or cancellation.
@@ -413,6 +424,17 @@ impl<S: fmt::Display, P: fmt::Debug> fmt::Display for BringUpError<S, P> {
             Self::Phy { step, error, .. } => {
                 write!(f, "bring-up stopped at {step:?}: PHY error: {error:?}")
             }
+            Self::VideoMismatch {
+                link_rate_khz,
+                video_rate_khz: Some(video),
+            } => write!(
+                f,
+                "bring-up refused: the link is for {link_rate_khz} kHz, the video gives {video} kHz"
+            ),
+            Self::VideoMismatch { link_rate_khz, .. } => write!(
+                f,
+                "bring-up refused: the link is for {link_rate_khz} kHz, and TMDS cannot carry the video"
+            ),
         }
     }
 }
@@ -422,7 +444,7 @@ impl<S: core::error::Error + 'static, P: fmt::Debug> core::error::Error for Brin
     fn source(&self) -> Option<&(dyn core::error::Error + 'static)> {
         match self {
             Self::Scdc { error, .. } => Some(error),
-            Self::Phy { .. } => None,
+            Self::Phy { .. } | Self::VideoMismatch { .. } => None,
         }
     }
 }
@@ -511,6 +533,19 @@ mod tests {
             "bring-up stopped at StartOutput: PHY error: ()"
         );
         assert!(phy.source().is_none());
+        let mismatch = |video_rate_khz| BringUpError::<Bus, ()>::VideoMismatch {
+            link_rate_khz: 594_000,
+            video_rate_khz,
+        };
+        assert_eq!(
+            mismatch(Some(148_500)).to_string(),
+            "bring-up refused: the link is for 594000 kHz, the video gives 148500 kHz"
+        );
+        assert_eq!(
+            mismatch(None).to_string(),
+            "bring-up refused: the link is for 594000 kHz, and TMDS cannot carry the video"
+        );
+        assert!(mismatch(None).source().is_none());
 
         let torn = |scrambler, output| TearDownError::<Bus, ()> {
             sink: SinkClear::NotRequested,

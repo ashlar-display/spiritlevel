@@ -164,6 +164,15 @@ pub enum TmdsEventKind {
         /// What it found, with the first error's kind in place of the error.
         check: crate::outcome::ScramblingCheck<DdcErrorKind>,
     },
+    /// A bring-up was refused before any I/O: the video's TMDS character rate is not the
+    /// link's.
+    #[non_exhaustive]
+    VideoMismatch {
+        /// The rate the link was chosen for.
+        link_rate_khz: u32,
+        /// The video's rate; `None` for a video TMDS cannot carry.
+        video_rate_khz: Option<u32>,
+    },
     /// A bring-up saw the caller's cancel flag and stopped; the tear-down's events follow,
     /// unless it was seen at entry.
     #[non_exhaustive]

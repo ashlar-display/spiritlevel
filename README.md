@@ -100,11 +100,15 @@ fn show<S: TmdsScdc, P: TmdsPhy, K: Clock, D: Delay>(
     delay: D,
     sink: SinkTmdsFacts,
 ) {
+    // The link is chosen for the rate the video gives; bring-up refuses any other.
+    let video = TmdsVideo::new(594_000, ColorBitDepth::Depth8, ColorFormat::Rgb444);
+    let Some(rate_khz) = video.character_rate_khz() else {
+        return; // a video TMDS cannot carry
+    };
     let source = SourceTmdsFacts::from(&phy.capabilities());
-    let Ok(link) = TmdsLinkParams::choose(594_000, sink, source, TmdsPolicy::DEFAULT) else {
+    let Ok(link) = TmdsLinkParams::choose(rate_khz, sink, source, TmdsPolicy::DEFAULT) else {
         return; // a rate this sink and source cannot carry
     };
-    let video = TmdsVideo::new(594_000, ColorBitDepth::Depth8, ColorFormat::Rgb444);
 
     let mut tmds = TmdsLink::new(scdc, phy, clock, delay);
     match tmds.bring_up(&link, video, &BringUpConfig::DEFAULT) {
