@@ -252,6 +252,18 @@ mod tests {
     }
 
     #[test]
+    fn the_transport_reads_blocks_as_a_sink_would() {
+        let mut sink = Sink::new();
+        sink.regs[0x40 - 2] = 0xAB;
+        sink.regs[0x40 - 1] = 0xCD;
+        let mut buf = [0; 2];
+        ScdcTransport::read_block(&sink, 0x40 - 2, &mut buf).unwrap();
+        assert_eq!(buf, [0xAB, 0xCD]);
+        sink.fail_from = 0;
+        assert!(ScdcTransport::read_block(&sink, 0, &mut buf).is_err());
+    }
+
+    #[test]
     fn a_protocol_error_is_unsupported() {
         let refused = CulvertError::<DdcErrorKind>(ScdcError::Protocol(
             culvert::ProtocolError::UnknownFrlRate(0xF),
