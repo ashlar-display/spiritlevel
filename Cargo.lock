@@ -9,6 +9,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3ded4057c258ba199e2d26386d3af3780957ecaee6c4ef4041c6b4b8b97c0b06"
 
 [[package]]
+name = "culvert"
+version = "0.3.1"
+source = "git+https://github.com/ashlar-display/culvert?rev=215df8aaa408d1932d3f378652dd3d2e4e66539d#215df8aaa408d1932d3f378652dd3d2e4e66539d"
+dependencies = [
+ "display-types",
+ "hdmi-hal",
+]
+
+[[package]]
 name = "display-types"
 version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -18,8 +27,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "hdmi-hal"
+version = "0.6.1"
+source = "git+https://github.com/ashlar-display/hdmi-hal?rev=29754ce9ec60c54f86170ebd43729e7fbaee043f#29754ce9ec60c54f86170ebd43729e7fbaee043f"
+dependencies = [
+ "display-types",
+]
+
+[[package]]
 name = "spiritlevel"
 version = "0.1.0"
 dependencies = [
+ "culvert",
  "display-types",
+ "hdmi-hal",
 ]
