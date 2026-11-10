@@ -591,8 +591,10 @@ fn deadline<Io: TmdsIo, F: FnMut(TmdsEvent)>(
 /// the ratio wait (slices of at most `check_interval`) and before each read of the check;
 /// never mid-call. Once set, the bring-up ends [`BringUpOutcome::Cancelled`]: at entry
 /// before any I/O, otherwise after a tear-down with the caller's `tear_down` settings
-/// (`tear_down_on_error` governs errors only). The tear-down is not cancelled, and the flag
-/// is never cleared: the caller resets it before its next call.
+/// (`tear_down_on_error` governs errors only), with the sink taken to be present: the flag
+/// does not say why it was set, and with `clear_sink` on a sink already gone gets one write
+/// that fails fast, a warning. The tear-down is not cancelled, and the flag is never
+/// cleared: the caller resets it before its next call.
 ///
 /// Records at most [`MAX_BRING_UP_EVENTS`](crate::MAX_BRING_UP_EVENTS) events.
 ///

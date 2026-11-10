@@ -377,7 +377,10 @@ error, with where it was seen (`CancelPoint`):
 
 - at entry, before any I/O, with nothing torn down (`Cleanup::Skipped`);
 - anywhere else, after a tear-down with the caller's `TearDownConfig`, whatever
-  `tear_down_on_error` says.
+  `tear_down_on_error` says. The flag does not say why it was set, so the tear-down takes
+  the sink to be present: with `clear_sink` on, a sink already unplugged gets one write,
+  which fails fast and is a warning (`SinkClear::Failed`), as the sources that write
+  regardless of the connection do [30].
 
 Tear-down is the recovery and is not cancelled; the reconnect check is one read; the quick
 restore reads the flag in its check alone. No procedure clears the flag: the caller resets it
