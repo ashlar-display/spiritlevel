@@ -807,7 +807,8 @@ helpers, or a test double implements eight methods rather than a whole register 
 **The culvert adapter** (`culvert` feature): `TmdsScdc` for `culvert::Scdc<T>` over any
 `ScdcTransport`. Its error, `CulvertError<E>`, wraps culvert's `ScdcError<E>`: its kind is
 the transport's own for a transport error, and `Unsupported` for a request culvert refuses,
-which would be refused again. `update_tmds_config` uses culvert's own read-modify-write, and
+which would be refused again. It is `Copy` and `PartialEq` where culvert's error is, so the
+outcomes stay so, and prints and chains as culvert's error does. `update_tmds_config` uses culvert's own read-modify-write, and
 the bytes read reach `TmdsConfigReading::raw` and `ScramblingStatus::raw`.
 
 ---

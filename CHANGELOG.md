@@ -97,7 +97,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Implemented for `&mut T`, so a caller can lend its client and keep it.
 - **The `culvert` feature: `TmdsScdc` for culvert's client** (`culvert::Scdc<T>`, over any
   `ScdcTransport`), with culvert's errors wrapped in `CulvertError`, whose kind is the
-  transport's own, or `Unsupported` for a request culvert refuses. The reserved bits survive
+  transport's own, or `Unsupported` for a request culvert refuses; it is `Copy` and
+  `PartialEq` as culvert's error is, so the outcomes stay so, and prints and chains as it. The reserved bits survive
   culvert's own read-modify-write, and the bytes read reach `TmdsConfigReading::raw` and
   `ScramblingStatus::raw`.
 - **`TmdsLink`, the sync driver**: the four procedures with their `_with_events` forms,

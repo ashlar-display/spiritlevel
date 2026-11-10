@@ -20,8 +20,24 @@ use crate::types::{ScramblingStatus, SinkTmdsConfig, TmdsConfigReading};
 /// type. Its [`kind`](DdcError::kind) is the transport's own for a transport failure, and
 /// [`DdcErrorKind::Unsupported`] for a request culvert refuses as a protocol violation,
 /// which would be refused again; the procedures' requests never produce one.
-#[derive(Debug)]
+///
+/// It is as `Copy` and `PartialEq` as culvert's error, so the procedures' outcomes stay so,
+/// and a transparent wrapper otherwise: its `Display` is culvert's error's, and its
+/// `source` the one culvert's error gives.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CulvertError<E>(pub ScdcError<E>);
+
+impl<E: core::fmt::Display> core::fmt::Display for CulvertError<E> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
+impl<E: core::error::Error + 'static> core::error::Error for CulvertError<E> {
+    fn source(&self) -> Option<&(dyn core::error::Error + 'static)> {
+        self.0.source()
+    }
+}
 
 impl<E> From<ScdcError<E>> for CulvertError<E> {
     fn from(error: ScdcError<E>) -> Self {
@@ -243,5 +259,33 @@ mod tests {
         assert_eq!(refused.kind(), DdcErrorKind::Unsupported);
         let wrapped: CulvertError<DdcErrorKind> = ScdcError::Transport(DdcErrorKind::Busy).into();
         assert_eq!(wrapped.kind(), DdcErrorKind::Busy);
+    }
+
+    #[test]
+    fn the_wrapper_prints_compares_and_chains_as_culverts_error() {
+        extern crate std;
+        use core::error::Error;
+        use std::string::ToString;
+
+        #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+        struct Bus;
+        impl core::fmt::Display for Bus {
+            fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+                f.write_str("bus gone")
+            }
+        }
+        impl Error for Bus {}
+
+        let inner = ScdcError::Transport(Bus);
+        let wrapped = CulvertError(inner);
+        assert_eq!(wrapped.to_string(), inner.to_string());
+        assert_eq!(wrapped.source().unwrap().to_string(), "bus gone");
+        let copied = wrapped;
+        assert_eq!(copied, wrapped);
+
+        // So the procedures' outcomes are Copy and comparable with the culvert feature too.
+        fn copy_and_compare<T: Copy + PartialEq>() {}
+        copy_and_compare::<crate::LinkUp<CulvertError<Bus>>>();
+        copy_and_compare::<crate::BringUpError<CulvertError<Bus>, ()>>();
     }
 }
