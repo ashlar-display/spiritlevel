@@ -11,7 +11,7 @@ checksum = "3ded4057c258ba199e2d26386d3af3780957ecaee6c4ef4041c6b4b8b97c0b06"
 [[package]]
 name = "culvert"
 version = "0.3.1"
-source = "git+https://github.com/ashlar-display/culvert?rev=5e77b83c73e091919f597dedae4388c8a7f3052b#5e77b83c73e091919f597dedae4388c8a7f3052b"
+source = "git+https://github.com/ashlar-display/culvert?rev=215df8aaa408d1932d3f378652dd3d2e4e66539d#215df8aaa408d1932d3f378652dd3d2e4e66539d"
 dependencies = [
  "display-types",
  "hdmi-hal",
@@ -29,7 +29,7 @@ dependencies = [
 [[package]]
 name = "hdmi-hal"
 version = "0.6.1"
-source = "git+https://github.com/ashlar-display/hdmi-hal?rev=35131adfe65067620e004665f6e2a88a4dbd6fb9#35131adfe65067620e004665f6e2a88a4dbd6fb9"
+source = "git+https://github.com/ashlar-display/hdmi-hal?rev=29754ce9ec60c54f86170ebd43729e7fbaee043f#29754ce9ec60c54f86170ebd43729e7fbaee043f"
 dependencies = [
  "display-types",
 ]

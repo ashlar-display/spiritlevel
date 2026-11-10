@@ -28,5 +28,5 @@ culvert = { version = "0.3", default-features = false, optional = true }
 # commits of hdmi-hal's feat/tmds-phy branch and of culvert's feat/tmds-config, which
 # builds on it (the `culvert` feature), moved by hand. Removed when they are released.
 [patch.crates-io]
-hdmi-hal = { git = "https://github.com/ashlar-display/hdmi-hal", rev = "35131adfe65067620e004665f6e2a88a4dbd6fb9" }
-culvert = { git = "https://github.com/ashlar-display/culvert", rev = "5e77b83c73e091919f597dedae4388c8a7f3052b" }
+hdmi-hal = { git = "https://github.com/ashlar-display/hdmi-hal", rev = "29754ce9ec60c54f86170ebd43729e7fbaee043f" }
+culvert = { git = "https://github.com/ashlar-display/culvert", rev = "215df8aaa408d1932d3f378652dd3d2e4e66539d" }
