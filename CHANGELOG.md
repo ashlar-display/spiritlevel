@@ -17,6 +17,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Releases publish through crates.io trusted publishing only: the first-publish token path
   in publish.yml and the first-release path in release-prep, used once for 0.1.0, are
   removed.
+- **CI's test and MSRV jobs do not keep the checkout's git credentials**
+  (`persist-credentials: false`); they never push. The coverage job keeps them to push its
+  ratchet branch.
 
 ## [0.1.0] - 2026-11-08
 
