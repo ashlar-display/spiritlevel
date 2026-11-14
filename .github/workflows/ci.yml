@@ -23,6 +23,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
@@ -41,6 +43,16 @@ jobs:
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: ${{ runner.os }}-cargo-
 
+      - name: No [patch] on main
+        # A [patch] points a dependency at unreleased code for a prototype; cargo package
+        # drops it, so a release built with one would not build from crates.io.
+        if: github.ref == 'refs/heads/main'
+        run: |
+          if grep -q '^\[patch' Cargo.toml; then
+            echo "::error::Cargo.toml has a [patch] section; remove it before release"
+            exit 1
+          fi
+
       - name: Format check
         run: cargo fmt --check
 
@@ -50,8 +62,9 @@ jobs:
       - name: Clippy (no default features)
         run: cargo clippy --locked --all-targets --no-default-features -- -D warnings
 
+      # docs.rs builds with every feature, so the docs are checked the same way.
       - name: Docs
-        run: cargo rustdoc --locked -- -D warnings
+        run: cargo rustdoc --locked --all-features -- -D warnings
 
       - name: Test
         run: cargo test --locked
@@ -77,6 +90,8 @@ jobs:
       CARGO_MSRV_VERSION: 0.19.6
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       # Restore and save are separate steps so the binary is cached as soon as it is
       # built: a combined cache step saves only when the whole job succeeds, so while the
@@ -100,14 +115,14 @@ jobs:
           key: ${{ runner.os }}-cargo-msrv-${{ env.CARGO_MSRV_VERSION }}
 
       - name: Verify MSRV (test)
-        run: cargo msrv verify --output-format minimal -- cargo test --locked
+        run: cargo msrv verify -- cargo test --locked
 
       - name: Verify MSRV (test, no default features)
-        run: cargo msrv verify --output-format minimal -- cargo test --locked --no-default-features
+        run: cargo msrv verify -- cargo test --locked --no-default-features
 
       - name: Verify MSRV (no_std, no default features)
         run: >
-          cargo msrv verify --output-format minimal --target thumbv7em-none-eabi
+          cargo msrv verify --target thumbv7em-none-eabi
           -- cargo build --locked --no-default-features --target thumbv7em-none-eabi
 
   coverage:
@@ -120,6 +135,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Install stable toolchain
+        id: toolchain
         uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
         with:
           toolchain: stable
@@ -137,13 +153,16 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: ${{ runner.os }}-coverage-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: ${{ runner.os }}-coverage-
+          # The Rust version is in the key: a cache restored from another version holds
+          # instrumented binaries that `cargo llvm-cov clean --workspace` leaves behind, and
+          # the report would count their lines as uncovered.
+          key: ${{ runner.os }}-coverage-${{ steps.toolchain.outputs.cachekey }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-coverage-${{ steps.toolchain.outputs.cachekey }}-
 
       - name: Measure coverage
         run: |
           cargo llvm-cov clean --workspace
-          cargo llvm-cov --no-report
+          cargo llvm-cov --no-report --locked
           LINES=$(cargo llvm-cov report --json --summary-only \
             | python3 -c "import sys,json; d=json.load(sys.stdin); print(round(d['data'][0]['totals']['lines']['percent'], 2))")
           echo "COVERAGE=${LINES}" >> "$GITHUB_ENV"

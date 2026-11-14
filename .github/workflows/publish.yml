@@ -81,6 +81,15 @@ jobs:
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: ${{ runner.os }}-cargo-
 
+      - name: No [patch] in a release
+        # cargo package drops [patch], so a crate built with one would not build from
+        # crates.io; ci.yml checks the same on main.
+        run: |
+          if grep -q '^\[patch' Cargo.toml; then
+            echo "::error::Cargo.toml has a [patch] section; remove it before release"
+            exit 1
+          fi
+
       - name: Format check
         run: cargo fmt --check
 
@@ -90,8 +99,9 @@ jobs:
       - name: Clippy (no default features)
         run: cargo clippy --locked --all-targets --no-default-features -- -D warnings
 
+      # docs.rs builds with every feature, so the docs are checked the same way.
       - name: Docs
-        run: cargo rustdoc --locked -- -D warnings
+        run: cargo rustdoc --locked --all-features -- -D warnings
 
       - name: Test
         run: cargo test --locked
@@ -141,14 +151,14 @@ jobs:
           key: ${{ runner.os }}-cargo-msrv-${{ env.CARGO_MSRV_VERSION }}
 
       - name: Verify MSRV (test)
-        run: cargo msrv verify --output-format minimal -- cargo test --locked
+        run: cargo msrv verify -- cargo test --locked
 
       - name: Verify MSRV (test, no default features)
-        run: cargo msrv verify --output-format minimal -- cargo test --locked --no-default-features
+        run: cargo msrv verify -- cargo test --locked --no-default-features
 
       - name: Verify MSRV (no_std, no default features)
         run: >
-          cargo msrv verify --output-format minimal --target thumbv7em-none-eabi
+          cargo msrv verify --target thumbv7em-none-eabi
           -- cargo build --locked --no-default-features --target thumbv7em-none-eabi
 
   # What is about to be released, shown on the run page while the publish job

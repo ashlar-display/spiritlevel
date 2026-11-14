@@ -16,7 +16,7 @@ cargo build
 cargo fmt --check
 cargo clippy --all-targets -- -D warnings
 cargo clippy --all-targets --no-default-features -- -D warnings
-cargo rustdoc -- -D warnings
+cargo rustdoc --all-features -- -D warnings
 ```
 
 ## Running tests
@@ -45,7 +45,7 @@ The MSRV is `rust-version` in `Cargo.toml`. CI checks it with
 toolchain:
 
 ```sh
-cargo install cargo-msrv --locked
+cargo install cargo-msrv --version 0.19.6 --locked
 cargo msrv verify -- cargo test --locked
 cargo msrv verify -- cargo test --locked --no-default-features
 cargo msrv verify --target thumbv7em-none-eabi \
@@ -62,5 +62,11 @@ cargo llvm-cov
 ```
 
 The current baseline is stored in `.coverage-baseline`. CI fails if coverage drops more
-than 0.1% below it. On pushes to `main` or `develop`, an improvement automatically opens
+than 0.1 percentage points below it. On pushes to `main` or `develop`, an improvement automatically opens
 a `ci/coverage-ratchet` PR to commit the new baseline.
+
+Rust versions count lines differently, so the same code can measure differently on two
+versions. Measure the baseline with the Rust version CI's `stable` uses
+(`cargo +<version> llvm-cov …`), or CI can fail on a baseline that a different local
+version produced.
+

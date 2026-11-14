@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **docs.rs marks the items that need the `display-types` feature** (the `From` impls for
+  display-types' sink capability types) with the `doc_cfg` badge, enabled only in docs.rs
+  builds.
+
 ### Changed
 
 - **The README shows the "trusted publishing only" badge**: crates.io refuses token
@@ -17,6 +23,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Releases publish through crates.io trusted publishing only: the first-publish token path
   in publish.yml and the first-release path in release-prep, used once for 0.1.0, are
   removed.
+- **CI's test and MSRV jobs do not keep the checkout's git credentials**
+  (`persist-credentials: false`); they never push. The coverage job keeps them to push its
+  ratchet branch.
+- **CI fails on a `[patch]` section in `Cargo.toml`**, on `main` and in the publish
+  workflow's `verify` job: `cargo package` drops it, so a release built with one would not
+  build from crates.io.
+- **rustdoc runs with every feature**, as docs.rs builds, in CI and in the publish
+  workflow's `verify` job.
+- **The MSRV job shows why it failed**: `cargo msrv verify` runs without
+  `--output-format minimal`, which printed only `true` or `false` and dropped the compiler
+  error.
+- **The coverage job's cache is keyed on the Rust version** as well as `Cargo.lock`, so a
+  `target/` built by an older Rust is not restored: `cargo llvm-cov clean --workspace`
+  leaves its instrumented binaries behind, and the report would count their lines as
+  uncovered (it did so in other Ashlar crates after the update to Rust 1.100). The
+  coverage run is `--locked`, as the other jobs are.
+- **The documentation is built as docs.rs builds it, weekly**: `docs.yml` runs
+  `cargo doc --all-features` with nightly and `--cfg docsrs` (and `-D warnings`), so a
+  nightly change to the `doc_cfg` feature badges shows up before it breaks a docs.rs build.
+- **`doc/testing.md` describes the tests**: what each module's unit tests check, the README
+  doctest, the builds CI runs and the coverage ratchet.
+- **The docs give the coverage tolerance as 0.1 percentage points everywhere** (as CI
+  checks it, not 0.1%), `doc/setup.md` installs the cargo-msrv version CI pins (0.19.6),
+  `CONTRIBUTING.md` has a publishing section, and the README links `doc/testing.md`.
+- **`doc/setup.md` says to measure the coverage baseline with the Rust version CI uses**:
+  Rust versions count lines differently, so a baseline measured with another version can
+  fail CI without a change in coverage.
+- **`doc/testing.md`, `doc/setup.md` and `CONTRIBUTING.md` match the tests and CI**: the
+  boundary tests vary `ScramblingThreshold`, the policy test compares `Default` with
+  `DEFAULT`, the MSRV job builds only the no-default bare-target configuration, the
+  rustdoc command has `--all-features`, and `CONTRIBUTING.md` links `doc/testing.md`.
 
 ## [0.1.0] - 2026-11-08
 

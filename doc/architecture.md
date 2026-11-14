@@ -263,7 +263,7 @@ The input space is small, so the tests cover it whole:
   of expected facts, and `None` maps to `SinkTmdsFacts::NONE`.
 - **The README's example** runs as a doctest.
 
-CI measures line coverage and fails if it drops more than 0.1% below the recorded
+CI measures line coverage and fails if it drops more than 0.1 percentage points below the recorded
 baseline.
 
 ---
