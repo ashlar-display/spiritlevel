@@ -20,6 +20,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **CI's test and MSRV jobs do not keep the checkout's git credentials**
   (`persist-credentials: false`); they never push. The coverage job keeps them to push its
   ratchet branch.
+- **CI fails on a `[patch]` section in `Cargo.toml`**, on `main` and in the publish
+  workflow's `verify` job: `cargo package` drops it, so a release built with one would not
+  build from crates.io.
 
 ## [0.1.0] - 2026-11-08
 
