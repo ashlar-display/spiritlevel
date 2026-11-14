@@ -44,6 +44,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   nightly change to the `doc_cfg` feature badges shows up before it breaks a docs.rs build.
 - **`doc/testing.md` describes the tests**: what each module's unit tests check, the README
   doctest, the builds CI runs and the coverage ratchet.
+- **The docs give the coverage tolerance as 0.1 percentage points everywhere** (as CI
+  checks it, not 0.1%), `doc/setup.md` installs the cargo-msrv version CI pins (0.19.6),
+  `CONTRIBUTING.md` has a publishing section, and the README links `doc/testing.md`.
 
 ## [0.1.0] - 2026-11-08
 

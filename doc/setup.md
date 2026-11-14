@@ -45,7 +45,7 @@ The MSRV is `rust-version` in `Cargo.toml`. CI checks it with
 toolchain:
 
 ```sh
-cargo install cargo-msrv --locked
+cargo install cargo-msrv --version 0.19.6 --locked
 cargo msrv verify -- cargo test --locked
 cargo msrv verify -- cargo test --locked --no-default-features
 cargo msrv verify --target thumbv7em-none-eabi \
@@ -62,5 +62,5 @@ cargo llvm-cov
 ```
 
 The current baseline is stored in `.coverage-baseline`. CI fails if coverage drops more
-than 0.1% below it. On pushes to `main` or `develop`, an improvement automatically opens
+than 0.1 percentage points below it. On pushes to `main` or `develop`, an improvement automatically opens
 a `ci/coverage-ratchet` PR to commit the new baseline.

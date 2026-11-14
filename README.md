@@ -105,6 +105,7 @@ HDCP, hotplug detection, PHY electrical settings, and retry schedules. See
   link and their sources, the types, design principles and decisions
 - [`doc/roadmap.md`](doc/roadmap.md) — what is planned and under consideration
 - [`doc/setup.md`](doc/setup.md) — build, test, MSRV and coverage commands
+- [`doc/testing.md`](doc/testing.md) — what the tests check and how CI runs them
 - [`CONTRIBUTING.md`](CONTRIBUTING.md) — issues, pull requests and coding standards
 
 ## Verifying releases

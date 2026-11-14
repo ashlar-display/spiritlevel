@@ -50,8 +50,22 @@ is fine.
   extend the tests that run every combination of inputs, and add a named case for the
   change.
 - CI must be green before a PR can merge: fmt, clippy, docs, all test and build targets,
-  the MSRV check, and coverage must not drop more than 0.1% below the baseline (stored in
+  the MSRV check, and coverage must not drop more than 0.1 percentage points below the baseline (stored in
   `.coverage-baseline`).
+
+## Publishing and downstream dependencies
+
+With its default `display-types` feature, spiritlevel converts display-types' HF-SCDB type
+into its sink facts, so display-types' version is part of its API: moving to a breaking
+release of display-types is a breaking release of spiritlevel, unless the version
+requirement keeps accepting the old release as well. Other
+[Ashlar crates](https://ashlar-display.org/crates.html) depend on spiritlevel as a
+versioned crate dependency. Changes that add or modify public API must be merged, tagged,
+and published to crates.io before downstream crates can adopt them. The workflow is:
+
+1. Merge and tag a release in this repo (`vX.Y.Z`).
+2. The publish CI workflow uploads the new version to crates.io.
+3. Update the version constraint in the downstream crate's `Cargo.toml`.
 
 ## Review process
 
