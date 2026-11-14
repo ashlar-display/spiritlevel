@@ -28,6 +28,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **The MSRV job shows why it failed**: `cargo msrv verify` runs without
   `--output-format minimal`, which printed only `true` or `false` and dropped the compiler
   error.
+- **The coverage job's cache is keyed on the Rust version** as well as `Cargo.lock`, so a
+  `target/` built by an older Rust is not restored: `cargo llvm-cov clean --workspace`
+  leaves its instrumented binaries behind, and the report would count their lines as
+  uncovered (it did so in other Ashlar crates after the update to Rust 1.100). The
+  coverage run is `--locked`, as the other jobs are.
 
 ## [0.1.0] - 2026-11-08
 
