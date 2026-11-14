@@ -115,14 +115,14 @@ jobs:
           key: ${{ runner.os }}-cargo-msrv-${{ env.CARGO_MSRV_VERSION }}
 
       - name: Verify MSRV (test)
-        run: cargo msrv verify --output-format minimal -- cargo test --locked
+        run: cargo msrv verify -- cargo test --locked
 
       - name: Verify MSRV (test, no default features)
-        run: cargo msrv verify --output-format minimal -- cargo test --locked --no-default-features
+        run: cargo msrv verify -- cargo test --locked --no-default-features
 
       - name: Verify MSRV (no_std, no default features)
         run: >
-          cargo msrv verify --output-format minimal --target thumbv7em-none-eabi
+          cargo msrv verify --target thumbv7em-none-eabi
           -- cargo build --locked --no-default-features --target thumbv7em-none-eabi
 
   coverage:

@@ -25,6 +25,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   build from crates.io.
 - **rustdoc runs with every feature**, as docs.rs builds, in CI and in the publish
   workflow's `verify` job.
+- **The MSRV job shows why it failed**: `cargo msrv verify` runs without
+  `--output-format minimal`, which printed only `true` or `false` and dropped the compiler
+  error.
 
 ## [0.1.0] - 2026-11-08
 
