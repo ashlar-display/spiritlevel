@@ -23,6 +23,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **CI fails on a `[patch]` section in `Cargo.toml`**, on `main` and in the publish
   workflow's `verify` job: `cargo package` drops it, so a release built with one would not
   build from crates.io.
+- **rustdoc runs with every feature**, as docs.rs builds, in CI and in the publish
+  workflow's `verify` job.
 
 ## [0.1.0] - 2026-11-08
 
