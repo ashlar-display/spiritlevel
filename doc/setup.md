@@ -16,7 +16,7 @@ cargo build
 cargo fmt --check
 cargo clippy --all-targets -- -D warnings
 cargo clippy --all-targets --no-default-features -- -D warnings
-cargo rustdoc -- -D warnings
+cargo rustdoc --all-features -- -D warnings
 ```
 
 ## Running tests

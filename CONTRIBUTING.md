@@ -7,8 +7,9 @@ Thanks for your interest in contributing. This document covers the basics.
 Relevant docs for contributors:
 
 - [`doc/setup.md`](doc/setup.md) — build, test, MSRV and coverage commands
+- [`doc/testing.md`](doc/testing.md) — what the tests check and how CI runs them
 - [`doc/architecture.md`](doc/architecture.md) — role, scope, the rules for choosing the
-  link and their sources, the types, the testing strategy, design principles and decisions
+  link and their sources, the types, design principles and decisions
 - [`doc/roadmap.md`](doc/roadmap.md) — what is planned and under consideration
 
 ## Issues and pull requests
@@ -28,7 +29,7 @@ is fine.
 ## Coding standards
 
 - Run `cargo fmt` and `cargo clippy --all-targets -- -D warnings` before pushing.
-- Public items need rustdoc comments (`cargo rustdoc -- -D warnings` must pass).
+- Public items need rustdoc comments (`cargo rustdoc --all-features -- -D warnings` must pass).
 - Follow the existing patterns in the codebase — see
   [`doc/architecture.md`](doc/architecture.md) for the design principles behind them.
 - `#![forbid(unsafe_code)]` is enforced; no unsafe code.

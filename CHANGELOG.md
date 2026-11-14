@@ -50,6 +50,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`doc/setup.md` says to measure the coverage baseline with the Rust version CI uses**:
   Rust versions count lines differently, so a baseline measured with another version can
   fail CI without a change in coverage.
+- **`doc/testing.md`, `doc/setup.md` and `CONTRIBUTING.md` match the tests and CI**: the
+  boundary tests vary `ScramblingThreshold`, the policy test compares `Default` with
+  `DEFAULT`, the MSRV job builds only the no-default bare-target configuration, the
+  rustdoc command has `--all-features`, and `CONTRIBUTING.md` links `doc/testing.md`.
 
 ## [0.1.0] - 2026-11-08
 
