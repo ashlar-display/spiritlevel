@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **docs.rs marks the items that need the `display-types` feature** (the `From` impls for
+  display-types' sink capability types) with the `doc_cfg` badge, enabled only in docs.rs
+  builds.
+
 ### Changed
 
 - **The README shows the "trusted publishing only" badge**: crates.io refuses token
@@ -33,6 +39,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   leaves its instrumented binaries behind, and the report would count their lines as
   uncovered (it did so in other Ashlar crates after the update to Rust 1.100). The
   coverage run is `--locked`, as the other jobs are.
+- **The documentation is built as docs.rs builds it, weekly**: `docs.yml` runs
+  `cargo doc --all-features` with nightly and `--cfg docsrs` (and `-D warnings`), so a
+  nightly change to the `doc_cfg` feature badges shows up before it breaks a docs.rs build.
 
 ## [0.1.0] - 2026-11-08
 
