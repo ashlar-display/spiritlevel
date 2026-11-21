@@ -11,8 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **`ClockRatio` is hdmi-hal's `TmdsClockRatio`**, re-exported under the old name, so the
   link parameters pass straight to the PHY. The variants (`Div10`, `Div40`) and derives are
-  the same; what changes is that spiritlevel now depends on hdmi-hal, and with it always on
-  display-types.
+  the same; what changes is that spiritlevel now depends on hdmi-hal, 0.7, and with it always
+  on display-types.
 - **Equality of the sink facts and of the link includes the new fields.** `SinkTmdsFacts`
   compares and hashes `frl_capable` too, so facts converted from an EDID that declares no
   FRL differ from `SinkTmdsFacts::new`'s for a sink with SCDC; `TmdsLinkParams` compares
