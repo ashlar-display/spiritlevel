@@ -48,7 +48,7 @@ The MSRV is `rust-version` in `Cargo.toml`. CI checks it with
 toolchain:
 
 ```sh
-cargo install cargo-msrv --locked
+cargo install cargo-msrv --version 0.19.6 --locked
 cargo msrv verify -- cargo test --locked
 cargo msrv verify -- cargo test --locked --no-default-features
 cargo msrv verify -- cargo test --locked --features culvert
@@ -71,5 +71,11 @@ cargo llvm-cov report
 The second run covers the `culvert` adapter; the report merges both, as CI does.
 
 The current baseline is stored in `.coverage-baseline`. CI fails if coverage drops more
-than 0.1% below it. On pushes to `main` or `develop`, an improvement automatically opens
+than 0.1 percentage points below it. On pushes to `main` or `develop`, an improvement automatically opens
 a `ci/coverage-ratchet` PR to commit the new baseline.
+
+Rust versions count lines differently, so the same code can measure differently on two
+versions. Measure the baseline with the Rust version CI's `stable` uses
+(`cargo +<version> llvm-cov …`), or CI can fail on a baseline that a different local
+version produced.
+

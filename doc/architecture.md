@@ -1014,7 +1014,7 @@ delay:
   `ScdcTransport`.
 - **The README's examples** run as doctests.
 
-CI measures line coverage and fails if it drops more than 0.1% below the recorded
+CI measures line coverage and fails if it drops more than 0.1 percentage points below the recorded
 baseline.
 
 ---
