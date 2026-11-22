@@ -97,7 +97,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `DdcError`, so a procedure can tell a failure that will pass from one that will not;
   `UpdateError` says which half of a read-and-write failed, and is a `DdcError` too.
   Implemented for `&mut T`, so a caller can lend its client and keep it.
-- **The `culvert` feature: `TmdsScdc` for culvert's client** (`culvert::Scdc<T>`, over any
+- **The `culvert` feature: `TmdsScdc` for culvert's client** (culvert 0.4's `Scdc<T>`, over any
   `ScdcTransport`), with culvert's errors wrapped in `CulvertError`, whose kind is the
   transport's own, or `Unsupported` for a request culvert refuses; it is `Copy` and
   `PartialEq` as culvert's error is, so the outcomes stay so, and prints and chains as it. The reserved bits survive
@@ -149,6 +149,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Internal
 
+- **The procedures are tested against maquette's simulated sink** (`tests/simulated_sink.rs`,
+  with the `culvert` feature and a dev-dependency on maquette): through culvert's client over
+  a simulated DDC bus, with a simulated PHY, time, HPD and faults.
 - CI and the publish workflow's verify job also run the `culvert` adapter's tests and build
   the docs with every feature, as docs.rs does; the MSRV check and the coverage measurement
   include the `culvert` feature.

@@ -14,6 +14,28 @@ Unit tests live in a `#[cfg(test)]` module at the end of each file:
 | `src/types.rs` | The fact and policy types: constructors keep their fields in order and are `const`, `NONE` matches `new(false, false, false)`, `DEFAULT` matches `Default` (low-rate scrambling on, `Above340`), the policy builders change one field each; with `display-types`, the conversion from the HF-SCDB (an absent block gives `NONE`) |
 | `src/error.rs` | `ParamsError`'s `Display` names every missing fact, and reads well without one |
 
+## Against a simulated sink (`tests/simulated_sink.rs`)
+
+With the `culvert` feature, the procedures run through culvert's client, over hdmi-hal's
+`ScdcOverDdc` on [maquette](https://docs.rs/maquette)'s simulated DDC bus, with its
+simulated PHY and its time as clock and delay. The sink keeps its scrambling lock, its
+`TMDS_Config` and its HPD resets as the public receivers do; refusals, delays and faults
+are set per test.
+
+**Covered:**
+- A bring-up at 594 Mcsc locks the sink, and a tear-down clears it; a plain 1/10 link
+  writes `TMDS_Config` 0 and checks nothing; low-rate scrambling at 1/10 locks
+- A slow sink locks within the check window, and a slower one does not
+- The quick restore: a sink that withholds the status once locks on it; one that resyncs
+  on the rewrite is waited out; a sink that drops `Scrambling_Enable` is found lost and
+  restored
+- HPD: by default any pulse loses the configuration; a sink that resets only after 100 ms
+  of HPD low keeps it over a short pulse and loses it over a long one
+- A strict sink locks when the scrambler follows the write, but not on a quick restore with
+  scrambled output already running; a tear-down and a bring-up recover
+- Faults: a NACKed `TMDS_Config` write carries on with a warning; a detached one ends the
+  bring-up with a tear-down; a failed `start_output` ends it with a PHY error
+
 ## Doctests
 
 The README's example runs as a doctest (`ReadmeDoctests` in `src/lib.rs`) and asserts the
