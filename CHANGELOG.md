@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-11-22
+
 ### Breaking changes
 
 - **`ClockRatio` is hdmi-hal's `TmdsClockRatio`**, re-exported under the old name, so the
