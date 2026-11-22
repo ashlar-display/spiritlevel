@@ -69,7 +69,7 @@ jobs:
       - name: Test
         run: cargo test --locked
 
-      # Without display-types: the crate has no dependencies, and the From impls are gone.
+      # Without display-types' From impls (display-types itself still comes through hdmi-hal).
       - name: Test (no default features)
         run: cargo test --locked --no-default-features
 
@@ -78,6 +78,16 @@ jobs:
 
       - name: Build (no_std, no default features)
         run: cargo build --locked --no-default-features --target thumbv7em-none-eabi
+
+      # The culvert feature: the adapter implementing the SCDC trait for culvert's client.
+      - name: Clippy (culvert)
+        run: cargo clippy --locked --all-targets --features culvert -- -D warnings
+
+      - name: Test (culvert)
+        run: cargo test --locked --features culvert
+
+      - name: Build (no_std, culvert)
+        run: cargo build --locked --features culvert --target thumbv7em-none-eabi
 
   # cargo-msrv reads the MSRV from Cargo.toml's rust-version and runs the checks on that
   # toolchain. Built from crates.io with --locked at a pinned version, not install-action:
@@ -119,6 +129,9 @@ jobs:
 
       - name: Verify MSRV (test, no default features)
         run: cargo msrv verify -- cargo test --locked --no-default-features
+
+      - name: Verify MSRV (test, culvert)
+        run: cargo msrv verify -- cargo test --locked --features culvert
 
       - name: Verify MSRV (no_std, no default features)
         run: >
@@ -163,6 +176,9 @@ jobs:
         run: |
           cargo llvm-cov clean --workspace
           cargo llvm-cov --no-report --locked
+          # The culvert adapter is only compiled with its feature; measure it too, so the
+          # baseline covers it. The two runs are merged into one report.
+          cargo llvm-cov --no-report --locked --features culvert
           LINES=$(cargo llvm-cov report --json --summary-only \
             | python3 -c "import sys,json; d=json.load(sys.stdin); print(round(d['data'][0]['totals']['lines']['percent'], 2))")
           echo "COVERAGE=${LINES}" >> "$GITHUB_ENV"

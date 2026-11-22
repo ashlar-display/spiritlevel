@@ -106,7 +106,7 @@ jobs:
       - name: Test
         run: cargo test --locked
 
-      # Without display-types: the crate has no dependencies, and the From impls are gone.
+      # Without display-types' From impls (display-types itself still comes through hdmi-hal).
       - name: Test (no default features)
         run: cargo test --locked --no-default-features
 
@@ -115,6 +115,16 @@ jobs:
 
       - name: Build (no_std, no default features)
         run: cargo build --locked --no-default-features --target thumbv7em-none-eabi
+
+      # The culvert feature: the adapter implementing the SCDC trait for culvert's client.
+      - name: Clippy (culvert)
+        run: cargo clippy --locked --all-targets --features culvert -- -D warnings
+
+      - name: Test (culvert)
+        run: cargo test --locked --features culvert
+
+      - name: Build (no_std, culvert)
+        run: cargo build --locked --features culvert --target thumbv7em-none-eabi
 
   # The MSRV check, as in ci.yml (see the comment there on how cargo-msrv is installed).
   msrv:
@@ -155,6 +165,9 @@ jobs:
 
       - name: Verify MSRV (test, no default features)
         run: cargo msrv verify -- cargo test --locked --no-default-features
+
+      - name: Verify MSRV (test, culvert)
+        run: cargo msrv verify -- cargo test --locked --features culvert
 
       - name: Verify MSRV (no_std, no default features)
         run: >
