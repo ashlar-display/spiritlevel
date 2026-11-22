@@ -23,6 +23,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
@@ -41,6 +43,16 @@ jobs:
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: ${{ runner.os }}-cargo-
 
+      - name: No [patch] on main
+        # A [patch] points a dependency at unreleased code for a prototype; cargo package
+        # drops it, so a release built with one would not build from crates.io.
+        if: github.ref == 'refs/heads/main'
+        run: |
+          if grep -q '^\[patch' Cargo.toml; then
+            echo "::error::Cargo.toml has a [patch] section; remove it before release"
+            exit 1
+          fi
+
       - name: Format check
         run: cargo fmt --check
 
@@ -50,13 +62,14 @@ jobs:
       - name: Clippy (no default features)
         run: cargo clippy --locked --all-targets --no-default-features -- -D warnings
 
+      # docs.rs builds with every feature, so the docs are checked the same way.
       - name: Docs
-        run: cargo rustdoc --locked -- -D warnings
+        run: cargo rustdoc --locked --all-features -- -D warnings
 
       - name: Test
         run: cargo test --locked
 
-      # Without display-types: the crate has no dependencies, and the From impls are gone.
+      # Without display-types' From impls (display-types itself still comes through hdmi-hal).
       - name: Test (no default features)
         run: cargo test --locked --no-default-features
 
@@ -65,6 +78,16 @@ jobs:
 
       - name: Build (no_std, no default features)
         run: cargo build --locked --no-default-features --target thumbv7em-none-eabi
+
+      # The culvert feature: the adapter implementing the SCDC trait for culvert's client.
+      - name: Clippy (culvert)
+        run: cargo clippy --locked --all-targets --features culvert -- -D warnings
+
+      - name: Test (culvert)
+        run: cargo test --locked --features culvert
+
+      - name: Build (no_std, culvert)
+        run: cargo build --locked --features culvert --target thumbv7em-none-eabi
 
   # cargo-msrv reads the MSRV from Cargo.toml's rust-version and runs the checks on that
   # toolchain. Built from crates.io with --locked at a pinned version, not install-action:
@@ -77,6 +100,8 @@ jobs:
       CARGO_MSRV_VERSION: 0.19.6
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       # Restore and save are separate steps so the binary is cached as soon as it is
       # built: a combined cache step saves only when the whole job succeeds, so while the
@@ -100,14 +125,17 @@ jobs:
           key: ${{ runner.os }}-cargo-msrv-${{ env.CARGO_MSRV_VERSION }}
 
       - name: Verify MSRV (test)
-        run: cargo msrv verify --output-format minimal -- cargo test --locked
+        run: cargo msrv verify -- cargo test --locked
 
       - name: Verify MSRV (test, no default features)
-        run: cargo msrv verify --output-format minimal -- cargo test --locked --no-default-features
+        run: cargo msrv verify -- cargo test --locked --no-default-features
+
+      - name: Verify MSRV (test, culvert)
+        run: cargo msrv verify -- cargo test --locked --features culvert
 
       - name: Verify MSRV (no_std, no default features)
         run: >
-          cargo msrv verify --output-format minimal --target thumbv7em-none-eabi
+          cargo msrv verify --target thumbv7em-none-eabi
           -- cargo build --locked --no-default-features --target thumbv7em-none-eabi
 
   coverage:
@@ -120,13 +148,14 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Install stable toolchain
+        id: toolchain
         uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
         with:
           toolchain: stable
           components: llvm-tools-preview
 
       - name: Install cargo-llvm-cov
-        uses: taiki-e/install-action@c509219cf42fba86913069efd0ade2458c59337b # v2.90.1
+        uses: taiki-e/install-action@75a7c0f87bd666af3cdb75c5b9e9d03ab6044e6f # v2.90.6
         with:
           tool: cargo-llvm-cov
 
@@ -137,13 +166,19 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: ${{ runner.os }}-coverage-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: ${{ runner.os }}-coverage-
+          # The Rust version is in the key: a cache restored from another version holds
+          # instrumented binaries that `cargo llvm-cov clean --workspace` leaves behind, and
+          # the report would count their lines as uncovered.
+          key: ${{ runner.os }}-coverage-${{ steps.toolchain.outputs.cachekey }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-coverage-${{ steps.toolchain.outputs.cachekey }}-
 
       - name: Measure coverage
         run: |
           cargo llvm-cov clean --workspace
-          cargo llvm-cov --no-report
+          cargo llvm-cov --no-report --locked
+          # The culvert adapter is only compiled with its feature; measure it too, so the
+          # baseline covers it. The two runs are merged into one report.
+          cargo llvm-cov --no-report --locked --features culvert
           LINES=$(cargo llvm-cov report --json --summary-only \
             | python3 -c "import sys,json; d=json.load(sys.stdin); print(round(d['data'][0]['totals']['lines']['percent'], 2))")
           echo "COVERAGE=${LINES}" >> "$GITHUB_ENV"
@@ -168,7 +203,7 @@ jobs:
 
       - name: Open PR if baseline changed
         if: github.event_name == 'push'
-        uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8.1.1
+        uses: peter-evans/create-pull-request@3ffccacd46053766916f087ce41d627c0b8cf2d1 # v8.1.3
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           branch: ci/coverage-ratchet

@@ -16,17 +16,19 @@ cargo build
 cargo fmt --check
 cargo clippy --all-targets -- -D warnings
 cargo clippy --all-targets --no-default-features -- -D warnings
-cargo rustdoc -- -D warnings
+cargo clippy --all-targets --features culvert -- -D warnings
+cargo rustdoc --all-features -- -D warnings
 ```
 
 ## Running tests
 
 ```sh
 cargo test                          # default features (display-types)
-cargo test --no-default-features    # no dependencies; the From impls are left out
+cargo test --no-default-features    # without display-types' From impls
+cargo test --features culvert       # with the adapter for culvert's SCDC client
 ```
 
-The README's example runs as a doctest with the others.
+The README's examples run as doctests with the others.
 
 ## `no_std` builds
 
@@ -36,6 +38,7 @@ The crate is `no_std` without `alloc` in every build. CI checks it on a bare tar
 rustup target add thumbv7em-none-eabi
 cargo build --target thumbv7em-none-eabi
 cargo build --no-default-features --target thumbv7em-none-eabi
+cargo build --features culvert --target thumbv7em-none-eabi
 ```
 
 ## Checking the MSRV
@@ -45,9 +48,10 @@ The MSRV is `rust-version` in `Cargo.toml`. CI checks it with
 toolchain:
 
 ```sh
-cargo install cargo-msrv --locked
+cargo install cargo-msrv --version 0.19.6 --locked
 cargo msrv verify -- cargo test --locked
 cargo msrv verify -- cargo test --locked --no-default-features
+cargo msrv verify -- cargo test --locked --features culvert
 cargo msrv verify --target thumbv7em-none-eabi \
   -- cargo build --locked --no-default-features --target thumbv7em-none-eabi
 ```
@@ -58,9 +62,20 @@ Coverage requires [`cargo-llvm-cov`](https://github.com/taiki-e/cargo-llvm-cov):
 
 ```sh
 cargo install cargo-llvm-cov
-cargo llvm-cov
+cargo llvm-cov clean --workspace
+cargo llvm-cov --no-report
+cargo llvm-cov --no-report --features culvert
+cargo llvm-cov report
 ```
 
+The second run covers the `culvert` adapter; the report merges both, as CI does.
+
 The current baseline is stored in `.coverage-baseline`. CI fails if coverage drops more
-than 0.1% below it. On pushes to `main` or `develop`, an improvement automatically opens
+than 0.1 percentage points below it. On pushes to `main` or `develop`, an improvement automatically opens
 a `ci/coverage-ratchet` PR to commit the new baseline.
+
+Rust versions count lines differently, so the same code can measure differently on two
+versions. Measure the baseline with the Rust version CI's `stable` uses
+(`cargo +<version> llvm-cov …`), or CI can fail on a baseline that a different local
+version produced.
+

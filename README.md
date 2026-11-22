@@ -6,6 +6,7 @@
 [![License: MPL-2.0](https://img.shields.io/badge/license-MPL--2.0-blue.svg)](LICENSE)
 [![Rust 1.85+](https://img.shields.io/badge/rustc-1.85+-orange.svg)](https://blog.rust-lang.org/2025/02/20/Rust-1.85.0.html)
 [![SLSA Level 2](https://slsa.dev/images/gh-badge-level2.svg)](https://slsa.dev)
+[![trusted publishing only](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fcrates.io%2Fapi%2Fv1%2Fcrates%2Fspiritlevel&query=%24.crate.trustpub_only&label=trusted%20publishing%20only)](#verifying-releases)
 
 > **Part of [Ashlar](https://ashlar-display.org)** — a display connection stack in Rust,
 > HDMI 2.1 first: from EDID parsing through mode negotiation to FRL link training.
@@ -15,16 +16,20 @@ TMDS link bring-up for HDMI sources.
 
 `spiritlevel` decides a TMDS link's bit clock ratio (1/10 or 1/40) and scrambling from the
 TMDS character rate, what the sink and the source can do, and the caller's policy, and
-states what the sink's `TMDS_Config` must hold. Where implementations of HDMI sources
-differ, the behaviour is a setting with a documented default, and every reason the link is
-or is not scrambled is reported.
+states what the sink's `TMDS_Config` must hold. Its procedures then carry that out over the
+PHY and the sink's SCDC: bring-up, tear-down, the reconnect check after a hotplug, and the
+quick restore. Where implementations of HDMI sources differ, the behaviour is a setting
+with a documented default, every reason the link is or is not scrambled is reported, and
+every step of a procedure is recorded as a structured event.
 
 ## Status
 
-`spiritlevel` currently provides the link parameters alone: a pure, I/O-free, `const`
-function with no hardware dependency. The procedures — bring-up, tear-down and the
-reconnect check over the PHY and SCDC — are planned, together with the async companion
-`spiritlevel-async`; see the [roadmap](doc/roadmap.md).
+The link parameters are a pure, I/O-free, `const` function. The procedures are written
+once as an I/O-free core (`spiritlevel::procedure`) and driven synchronously by `TmdsLink`,
+over [hdmi-hal](https://github.com/ashlar-display/hdmi-hal)'s TMDS PHY, clock and delay
+traits and the crate's own `TmdsScdc`. Each makes one attempt per call; retries are the
+caller's. The async companion `spiritlevel-async` is planned; see the
+[roadmap](doc/roadmap.md).
 
 ## Usage
 
@@ -68,14 +73,67 @@ fn main() -> Result<(), ParamsError> {
 ```
 
 Where HDMI sources differ, `TmdsPolicy` holds the setting: whether to scramble at or
-below 340 Mcsc when both ends can (default on), and whether exactly 340 000 kHz counts as
-above the threshold (default not). A rate above 340 000 kHz on a sink that cannot take
-scrambling is refused with `ParamsError::ScramblingUnsupported`, naming every missing fact.
+below 340 Mcsc when both ends can (default on), whether exactly 340 000 kHz counts as
+above the threshold (default not), and which sinks with SCDC get the `TMDS_Config` write
+on a plain link (default all). A rate above 340 000 kHz on a sink that cannot take
+scrambling, or from a source without a scrambler, is refused with
+`ParamsError::ScramblingUnsupported`, naming every missing fact; a rate above the source's
+own maximum with `ParamsError::AboveSourceMaximum`.
+
+Then bring the link up over the parts: the sink's SCDC (`TmdsScdc`, implemented for
+culvert's client by the `culvert` feature), a `TmdsPhy`, a `Clock` and a `Delay`:
+
+```rust
+// spiritlevel re-exports the hdmi-hal types its API uses, so it is the only dependency.
+use spiritlevel::{
+    BringUpConfig, BringUpOutcome, CheckResult, Clock, ColorBitDepth, ColorFormat, Delay,
+    SinkPresence, SinkTmdsFacts, SourceTmdsFacts, TearDownConfig, TmdsLink, TmdsLinkParams,
+    TmdsPhy, TmdsPolicy, TmdsScdc, TmdsVideo,
+};
+
+/// Brings up 4K60 RGB over TMDS, then stops it again.
+fn show<S: TmdsScdc, P: TmdsPhy, K: Clock, D: Delay>(
+    scdc: S,
+    phy: P,
+    clock: K,
+    delay: D,
+    sink: SinkTmdsFacts,
+) {
+    // The link is chosen for the rate the video gives; bring-up refuses any other.
+    let video = TmdsVideo::new(594_000, ColorBitDepth::Depth8, ColorFormat::Rgb444);
+    let Some(rate_khz) = video.character_rate_khz() else {
+        return; // a video TMDS cannot carry
+    };
+    let source = SourceTmdsFacts::from(&phy.capabilities());
+    let Ok(link) = TmdsLinkParams::choose(rate_khz, sink, source, TmdsPolicy::DEFAULT) else {
+        return; // a rate this sink and source cannot carry
+    };
+
+    let mut tmds = TmdsLink::new(scdc, phy, clock, delay);
+    match tmds.bring_up(&link, video, &BringUpConfig::DEFAULT) {
+        Ok(BringUpOutcome::Up(up)) => {
+            // Whether the sink reports scrambled TMDS, and what went wrong without
+            // stopping the bring-up.
+            let _seen = up.check.result == CheckResult::Set;
+            for _warning in up.warnings.iter_warnings() {}
+        }
+        Ok(_cancelled) => {} // the cancel flag (`with_cancel`); never without one
+        Err(_error) => {}    // the step that failed, and the tear-down that followed
+    }
+    let _ = tmds.tear_down(&link, &TearDownConfig::DEFAULT, SinkPresence::Present);
+}
+```
+
+Each procedure has a `_with_events` form that calls a closure with every step, timestamped
+from the caller's clock; `MAX_BRING_UP_EVENTS` and its siblings bound how many, so a caller
+without `alloc` sizes its buffer.
 
 ## Features
 
 - **`display-types`** (default) — `From` conversions from display-types' `HdmiForumSinkCap`
-  into the sink facts. Without it the crate has no dependencies.
+  into the sink facts. Without it the caller fills the sink facts itself.
+- **`culvert`** — `TmdsScdc` for [culvert](https://github.com/ashlar-display/culvert)'s
+  SCDC client (`culvert::Scdc`), with culvert's errors wrapped in `CulvertError`.
 
 ## `no_std` builds
 
@@ -87,10 +145,11 @@ scrambling is refused with `ParamsError::ScramblingUnsupported`, naming every mi
 which trains FRL links: beside it in the stack, not on top of it. A link orchestrator
 chooses between them.
 
-Below it, [display-types](https://github.com/ashlar-display/display-types) supplies the
-sink's HDMI Forum capabilities (the `display-types` feature). The planned procedures will
-also use [hdmi-hal](https://github.com/ashlar-display/hdmi-hal) for the PHY and, behind a
-feature, [culvert](https://github.com/ashlar-display/culvert) for SCDC.
+Below it, [hdmi-hal](https://github.com/ashlar-display/hdmi-hal) supplies the TMDS PHY,
+clock and delay traits the procedures run over,
+[display-types](https://github.com/ashlar-display/display-types) the sink's HDMI Forum
+capabilities (the `display-types` feature), and, behind a feature,
+[culvert](https://github.com/ashlar-display/culvert) the SCDC client.
 
 ## Out of scope
 
@@ -101,9 +160,10 @@ HDCP, hotplug detection, PHY electrical settings, and retry schedules. See
 ## Documentation
 
 - [`doc/architecture.md`](doc/architecture.md) — role, scope, the rules for choosing the
-  link and their sources, the types, design principles and decisions
+  link and their sources, the types and design principles
 - [`doc/roadmap.md`](doc/roadmap.md) — what is planned and under consideration
 - [`doc/setup.md`](doc/setup.md) — build, test, MSRV and coverage commands
+- [`doc/testing.md`](doc/testing.md) — what the tests check and how CI runs them
 - [`CONTRIBUTING.md`](CONTRIBUTING.md) — issues, pull requests and coding standards
 
 ## Verifying releases
@@ -119,13 +179,14 @@ gh attestation verify spiritlevel-X.Y.Z.crate --repo ashlar-display/spiritlevel
 The attested `.crate` is attached to each
 [GitHub release](https://github.com/ashlar-display/spiritlevel/releases).
 
-0.1.0 is uploaded by the publish workflow with a crates.io API token scoped to publishing
+0.1.0 was uploaded by the publish workflow with a crates.io API token scoped to publishing
 this new crate, because trusted publishing can only be set up for a crate already on
-crates.io; the token is revoked afterwards. Later releases are uploaded through crates.io
+crates.io; the token was revoked afterwards. Later releases are uploaded through crates.io
 [trusted publishing](https://rust-lang.github.io/rfcs/3691-trusted-publishing-cratesio.html):
 the publish workflow obtains a short-lived token via OpenID Connect instead of using a
-stored API token. Each version's publishing details, including the workflow run and
-commit, are available from the crates.io API:
+stored API token. crates.io rejects uploads made with an API token for this crate; the
+badge above shows that this setting is on. Each version's publishing details, including
+the workflow run and commit, are available from the crates.io API:
 
 ```sh
 curl -A "your-tool (contact)" https://crates.io/api/v1/crates/spiritlevel/X.Y.Z

@@ -81,6 +81,15 @@ jobs:
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: ${{ runner.os }}-cargo-
 
+      - name: No [patch] in a release
+        # cargo package drops [patch], so a crate built with one would not build from
+        # crates.io; ci.yml checks the same on main.
+        run: |
+          if grep -q '^\[patch' Cargo.toml; then
+            echo "::error::Cargo.toml has a [patch] section; remove it before release"
+            exit 1
+          fi
+
       - name: Format check
         run: cargo fmt --check
 
@@ -90,13 +99,14 @@ jobs:
       - name: Clippy (no default features)
         run: cargo clippy --locked --all-targets --no-default-features -- -D warnings
 
+      # docs.rs builds with every feature, so the docs are checked the same way.
       - name: Docs
-        run: cargo rustdoc --locked -- -D warnings
+        run: cargo rustdoc --locked --all-features -- -D warnings
 
       - name: Test
         run: cargo test --locked
 
-      # Without display-types: the crate has no dependencies, and the From impls are gone.
+      # Without display-types' From impls (display-types itself still comes through hdmi-hal).
       - name: Test (no default features)
         run: cargo test --locked --no-default-features
 
@@ -105,6 +115,16 @@ jobs:
 
       - name: Build (no_std, no default features)
         run: cargo build --locked --no-default-features --target thumbv7em-none-eabi
+
+      # The culvert feature: the adapter implementing the SCDC trait for culvert's client.
+      - name: Clippy (culvert)
+        run: cargo clippy --locked --all-targets --features culvert -- -D warnings
+
+      - name: Test (culvert)
+        run: cargo test --locked --features culvert
+
+      - name: Build (no_std, culvert)
+        run: cargo build --locked --features culvert --target thumbv7em-none-eabi
 
   # The MSRV check, as in ci.yml (see the comment there on how cargo-msrv is installed).
   msrv:
@@ -141,14 +161,17 @@ jobs:
           key: ${{ runner.os }}-cargo-msrv-${{ env.CARGO_MSRV_VERSION }}
 
       - name: Verify MSRV (test)
-        run: cargo msrv verify --output-format minimal -- cargo test --locked
+        run: cargo msrv verify -- cargo test --locked
 
       - name: Verify MSRV (test, no default features)
-        run: cargo msrv verify --output-format minimal -- cargo test --locked --no-default-features
+        run: cargo msrv verify -- cargo test --locked --no-default-features
+
+      - name: Verify MSRV (test, culvert)
+        run: cargo msrv verify -- cargo test --locked --features culvert
 
       - name: Verify MSRV (no_std, no default features)
         run: >
-          cargo msrv verify --output-format minimal --target thumbv7em-none-eabi
+          cargo msrv verify --target thumbv7em-none-eabi
           -- cargo build --locked --no-default-features --target thumbv7em-none-eabi
 
   # What is about to be released, shown on the run page while the publish job
@@ -334,53 +357,18 @@ jobs:
               exit 1 ;;
           esac
 
-      # Trusted publishing can only be configured for a crate already on crates.io,
-      # so the crate's first publish uses CRATES_IO_FIRST_PUBLISH_TOKEN instead: a
-      # `release` environment secret holding a crates.io token scoped to publish-new
-      # for this crate, with a short expiry. Revoke it and delete the secret once the
-      # crate is published; every later release uses trusted publishing.
-      - name: Check whether the crate is on crates.io
-        if: steps.existing.outputs.published != 'true'
-        id: crate
-        run: |
-          NAME=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[0].name')
-          STATUS=$(curl -sS -A "$CRATES_IO_UA" -o /dev/null -w "%{http_code}" \
-            "https://crates.io/api/v1/crates/$NAME")
-          case "$STATUS" in
-            200 ) echo "first=false" >> "$GITHUB_OUTPUT" ;;
-            404 )
-              echo "$NAME is not on crates.io yet — first publish, with the first-publish token."
-              echo "first=true" >> "$GITHUB_OUTPUT" ;;
-            * )
-              echo "::error::Unexpected HTTP $STATUS from crates.io while checking $NAME."
-              exit 1 ;;
-          esac
-
       # Short-lived token via crates.io trusted publishing (OIDC); revoked
-      # automatically when the job ends.
+      # automatically when the job ends. No long-lived registry token is used.
       - name: Authenticate with crates.io
-        if: steps.existing.outputs.published != 'true' && steps.crate.outputs.first != 'true'
+        if: steps.existing.outputs.published != 'true'
         id: auth
         uses: rust-lang/crates-io-auth-action@3268eb413133e2960fa4ae0e963ca76380c54cd9 # v1.0.6
 
       - name: Publish to crates.io
         if: steps.existing.outputs.published != 'true'
+        run: cargo publish --locked --no-verify  # quality gates ran in the verify job
         env:
-          FIRST: ${{ steps.crate.outputs.first }}
-          OIDC_TOKEN: ${{ steps.auth.outputs.token }}
-          FIRST_PUBLISH_TOKEN: ${{ secrets.CRATES_IO_FIRST_PUBLISH_TOKEN }}
-        run: |
-          if [ "$FIRST" = true ]; then
-            if [ -z "$FIRST_PUBLISH_TOKEN" ]; then
-              echo "::error::First publish, but the release environment has no CRATES_IO_FIRST_PUBLISH_TOKEN secret."
-              exit 1
-            fi
-            CARGO_REGISTRY_TOKEN="$FIRST_PUBLISH_TOKEN"
-          else
-            CARGO_REGISTRY_TOKEN="$OIDC_TOKEN"
-          fi
-          export CARGO_REGISTRY_TOKEN
-          cargo publish --locked --no-verify  # quality gates ran in the verify job
+          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
 
       # Fail loudly if what crates.io serves is not byte-identical to the attested
       # copy (e.g. a version uploaded outside CI).
