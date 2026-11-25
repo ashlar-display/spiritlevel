@@ -18,6 +18,7 @@ rustdoc-args = ["--cfg", "docsrs"]
 
 [features]
 default = ["display-types"]
+display-types = ["dep:display-types"]
 culvert = ["dep:culvert"]
 
 [dependencies]

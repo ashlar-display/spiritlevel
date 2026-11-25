@@ -7,18 +7,13 @@ reconnect check and the quick restore, over hdmi-hal's TMDS PHY, clock and delay
 
 ## Planned
 
-### `spiritlevel-async`
+### Conformance checks for `TmdsScdc`
 
-An async companion crate, as plumbob has plumbob-async: an async driver over
-hdmi-hal-async's traits for the procedures' I/O-free core (`spiritlevel::procedure`), which
-the sync driver `TmdsLink` already runs, with futures that can be `Send`.
-
-### Testing the procedures
-
-Today the procedures are tested against a double of their I/O. Next they will be tested
-against a register-level simulated HDMI sink with a simulated clock, including sinks that
-refuse, delay or lose their configuration, and the crate will offer conformance checks that
-implementors of the new hdmi-hal traits can run.
+Checks that an implementation of `TmdsScdc` runs in its own tests against
+[maquette](https://github.com/ashlar-display/maquette)'s register-level simulated sink:
+each method's reads and writes, `clear_flt_update` leaving the other `Update_0` flags set
+([architecture](architecture.md), "The SCDC trait"), and errors passing their kind through. The procedures themselves are already tested
+against that sink.
 
 ### The link orchestrator
 
