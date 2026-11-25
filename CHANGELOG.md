@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **The `display-types` feature is declared** (`display-types = ["dep:display-types"]`),
+  with the same name: it was a feature only implicitly, because its optional dependency
+  was.
+- **The README and the architecture document name
+  [spiritlevel-async](https://github.com/ashlar-display/spiritlevel-async)**, the async
+  companion that drives the same procedures over hdmi-hal-async's traits, where they said
+  it was planned; the roadmap drops it, and its testing item keeps only the conformance
+  checks for `TmdsScdc`, since the procedures are tested against maquette's simulated sink.
+
 ## [0.2.0] - 2026-11-22
 
 ### Breaking changes

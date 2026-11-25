@@ -28,8 +28,10 @@ The link parameters are a pure, I/O-free, `const` function. The procedures are w
 once as an I/O-free core (`spiritlevel::procedure`) and driven synchronously by `TmdsLink`,
 over [hdmi-hal](https://github.com/ashlar-display/hdmi-hal)'s TMDS PHY, clock and delay
 traits and the crate's own `TmdsScdc`. Each makes one attempt per call; retries are the
-caller's. The async companion `spiritlevel-async` is planned; see the
-[roadmap](doc/roadmap.md).
+caller's. The async companion,
+[spiritlevel-async](https://github.com/ashlar-display/spiritlevel-async), drives the same
+core over [hdmi-hal-async](https://github.com/ashlar-display/hdmi-hal-async)'s traits, so
+sync and async bring-up are the same procedure.
 
 ## Usage
 
@@ -161,7 +163,7 @@ HDCP, hotplug detection, PHY electrical settings, and retry schedules. See
 
 - [`doc/architecture.md`](doc/architecture.md) — role, scope, the rules for choosing the
   link and their sources, the types and design principles
-- [`doc/roadmap.md`](doc/roadmap.md) — what is planned and under consideration
+- [`doc/roadmap.md`](doc/roadmap.md) — what comes next and is under consideration
 - [`doc/setup.md`](doc/setup.md) — build, test, MSRV and coverage commands
 - [`doc/testing.md`](doc/testing.md) — what the tests check and how CI runs them
 - [`CONTRIBUTING.md`](CONTRIBUTING.md) — issues, pull requests and coding standards

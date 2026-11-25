@@ -76,6 +76,7 @@ The features and the dependencies, with their versions in `Cargo.toml`:
 ```toml
 [features]
 default = ["display-types"]
+display-types = ["dep:display-types"]
 culvert = ["dep:culvert"]
 
 [dependencies]
@@ -963,8 +964,10 @@ events a callback, so nothing needs `alloc`. CI builds the crate for a bare targ
 (`thumbv7em-none-eabi`) with and without default features and with `culvert`, and checks the
 MSRV (Rust 1.85).
 
-An async driver over hdmi-hal-async's traits, with futures that can be `Send`, is planned
-as a companion crate; it drives the same core. Whatever drives it, a procedure is stopped
+The async driver is the companion crate
+[spiritlevel-async](https://github.com/ashlar-display/spiritlevel-async): it drives the same
+core over hdmi-hal-async's traits, with futures that can be `Send`. Whatever drives it, a
+procedure is stopped
 through its cancel flag, not by dropping its future (with `select`, a timeout or an
 aborted task): a dropped call leaves the PHY and the sink in an unknown state, and the
 caller loses the tear-down that `Cancelled` carries.
@@ -1042,8 +1045,8 @@ baseline.
 
 ## What comes next
 
-An async companion crate, testing against a simulated sink, and what is under
-consideration are on the [roadmap](roadmap.md).
+Conformance checks for implementations of `TmdsScdc`, and what is under consideration, are
+on the [roadmap](roadmap.md).
 
 ---
 
